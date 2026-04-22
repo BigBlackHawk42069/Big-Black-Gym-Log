@@ -1,4 +1,4 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         Big Black Gym Log
 // @namespace    http://tampermonkey.net/
 // @version      0.8.94
@@ -14,7 +14,7 @@
     'use strict';
 
     /**
-     *  [SECTION I] THE DIET PLAN (Meta & Globals)
+     *  [SECTION I] THE DIET PLAN (Constants & State)
      *  ========================================================================
      *  Essential macros. Where the magic numbers live. If this nutritional
      *  foundation fails, we all atrophy.
@@ -66,145 +66,126 @@
     if (!viewState.calYear) { const _n = TimeManager.now(); calendarState.year = _n.year; calendarState.month = _n.month; }
 
     /**
-     *  [SECTION I-B] THE WAREHOUSE (IndexedDB Storage)
+     *  [SECTION II] THE SUPPLEMENTS (Utility Belt)
      *  ========================================================================
-     *  Heavy-duty storage for the training history dataset. Bypasses the 5MB
-     *  localStorage cap entirely. Everything else stays in localStorage.
+     *  Performance enhancers. Pure, distilled efficiency to make the heavy
+     *  lifting easier.
      */
 
-    const DBManager = {
-        _db: null,
-        _DB_NAME: 'bbgl_db',
-        _STORE_NAME: 'history',
-        _KEY: 'main',
-        initDB() {
-            return new Promise((resolve, reject) => {
-                if (this._db) { resolve(this._db); return; }
-                const req = indexedDB.open(this._DB_NAME, 1);
-                req.onupgradeneeded = (e) => {
-                    const db = e.target.result;
-                    if (!db.objectStoreNames.contains(this._STORE_NAME)) {
-                        db.createObjectStore(this._STORE_NAME);
-                    }
-                };
-                req.onsuccess = (e) => { this._db = e.target.result; resolve(this._db); };
-                req.onerror = (e) => { console.error('BBGL: IndexedDB open failed', e); reject(e); };
-            });
+    const Formatter = {
+        number(n, d = 0) { return (n === undefined || n === null) ? '0' : n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); },
+        abbr(n, d = 1) { if (!n && n !== 0) return '0'; const abs = Math.abs(n); if (abs < 1000) return Math.floor(n).toString(); const tiers = [[1e15, 'q'], [1e12, 't'], [1e9, 'b'], [1e6, 'm'], [1e3, 'k']]; for (const [mag, suffix] of tiers) { if (abs >= mag) return (n / mag).toFixed(d) + suffix; } return Math.floor(n).toString(); },
+        rate(n, exp = false) { if (!n && n !== 0) return '0'; if (n < 1000) return this.number(n, exp ? 2 : 1); if (exp) return this.number(Math.floor(n), 0); return this.abbr(n, 1); },
+        dual(val, r = false) { let std, exp; if (r) { std = this.rate(val, false); exp = this.rate(val, true); } else { std = Math.abs(val) > 9999 ? this.abbr(val) : this.number(val); exp = (Math.abs(val) >= 1e9) ? this.abbr(val, 4) : this.number(val); } return `<span class="view-std">${std}</span><span class="view-exp">${exp}</span>`; },
+        axis(n) { if (n === 0) return '0'; const abs = Math.abs(n); let div = 1, s = ''; if (abs >= 1e12) { div = 1e12; s = 't'; } else if (abs >= 1e9) { div = 1e9; s = 'b'; } else if (abs >= 1e6) { div = 1e6; s = 'm'; } else if (abs >= 1e3) { div = 1e3; s = 'k'; } return Math.round(n / div) + s; },
+        parse(s) { if (!s) return new Date(); return new Date(s.includes('T') ? s : s + 'T00:00:00Z'); },
+        dateISO(y, m, d) { return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; },
+        dateLogical(ts = null) { const d = ts ? new Date(ts) : new Date(); return this.dateISO(TimeManager.year(d), TimeManager.month(d), TimeManager.date(d)); },
+        datePretty(s) { if (!s || s.includes('Summary')) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`; },
+        dateMonthDay(s) { if (!s) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`; },
+        dateFull(s) { if (!s || s.includes('Summary')) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`; }
+    };
+
+    const TooltipController = {
+        el: null, arrow: null, currentTarget: null,
+        init() { if (this.el) return; this.el = document.createElement('div'); this.el.id = 'bbgl-tooltip'; this.arrow = document.createElement('div'); this.arrow.id = 'bbgl-tooltip-arrow'; this.el.appendChild(this.arrow); document.body.appendChild(this.el); },
+        hide() { if (this.el) { this.el.style.display = 'none'; this.currentTarget = null; } },
+        show(html, rect) {
+            if (!this.el) this.init(); this.el.innerHTML = html; this.el.appendChild(this.arrow); this.el.style.display = 'block'; this.el.className = '';
+            const ttRect = this.el.getBoundingClientRect(), pad = 12, view = { w: window.innerWidth, h: window.innerHeight };
+            let side = 'top'; const fitsTop = (rect.top - ttRect.height - pad >= 0), fitsBot = (rect.bottom + ttRect.height + pad <= view.h);
+            if (fitsTop) side = 'top'; else if (fitsBot) side = 'bottom'; else side = 'left';
+            let x = 0, y = 0;
+            if (side === 'top') { x = rect.left + (rect.width / 2) - (ttRect.width / 2); y = rect.top - ttRect.height - pad; } else if (side === 'bottom') { x = rect.left + (rect.width / 2) - (ttRect.width / 2); y = rect.bottom + pad; } else { x = rect.left - ttRect.width - pad; y = rect.top + (rect.height / 2) - (ttRect.height / 2); }
+            if (x < 5) x = 5; if (x + ttRect.width > view.w - 5) x = view.w - ttRect.width - 5; if (y < 5) y = 5; if (y + ttRect.height > view.h - 5) y = view.h - ttRect.height - 5;
+            this.el.style.left = x + 'px'; this.el.style.top = y + 'px'; this.el.classList.add('pos-' + side);
+            this.arrow.style.marginLeft = ''; this.arrow.style.marginTop = '';
         },
-        getStorage() {
-            return new Promise((resolve, reject) => {
-                if (!this._db) { resolve(null); return; }
-                try {
-                    const tx = this._db.transaction(this._STORE_NAME, 'readonly');
-                    const store = tx.objectStore(this._STORE_NAME);
-                    const req = store.get(this._KEY);
-                    req.onsuccess = () => resolve(sanitizeStorageRecord(req.result || null));
-                    req.onerror = (e) => { console.error('BBGL: IndexedDB read failed', e); reject(e); };
-                } catch (e) { reject(e); }
-            });
-        },
-        setStorage(data) {
-            return new Promise((resolve, reject) => {
-                if (!this._db) { resolve(); return; }
-                try {
-                    const tx = this._db.transaction(this._STORE_NAME, 'readwrite');
-                    const store = tx.objectStore(this._STORE_NAME);
-                    const req = store.put(data, this._KEY);
-                    tx.oncomplete = () => {
-                        _syncChannel.postMessage({ type: 'update', from: _TAB_ID });
-                        resolve();
-                    };
-                    tx.onerror = (e) => {
-                        const err = e.target.error;
-                        console.error('BBGL: IndexedDB write failed', err);
-                        if (err && err.name === 'QuotaExceededError') {
-                            alert("⚠️ STORAGE ERROR: Browser quota exceeded.\n\nYour data could not be saved. Please export your history and then 'Clear Data' to free up space.");
-                        }
-                        reject(err);
-                    };
-                } catch (e) { reject(e); }
-            });
-        },
-        clearStorage() {
-            return new Promise((resolve, reject) => {
-                if (!this._db) { resolve(); return; }
-                const tx = this._db.transaction(this._STORE_NAME, 'readwrite');
-                const store = tx.objectStore(this._STORE_NAME);
-                const req = store.delete(this._KEY);
-                req.onsuccess = () => { _syncChannel.postMessage({ type: 'update', from: _TAB_ID }); resolve(); };
-                req.onerror = (e) => { console.error('BBGL: IndexedDB clear failed', e); reject(e); };
-            });
+        resolve(target) { return target.closest('[data-tooltip], [data-tooltip-html]'); },
+        handleHover(e) {
+            const t = this.resolve(e.target);
+            if (!t) { if (this.currentTarget) this.hide(); return; }
+            if (this.currentTarget === t) return; this.currentTarget = t;
+            const h = t.getAttribute('data-tooltip-html'), txt = t.getAttribute('data-tooltip');
+            if (h) this.show(h, t.getBoundingClientRect()); else if (txt) this.show('<div style="text-align:center; color:#ddd;">' + txt + '</div>', t.getBoundingClientRect()); else this.hide();
         }
     };
 
-    const _syncChannel = new BroadcastChannel('bbgl_sync');
-    _syncChannel.onmessage = async (event) => {
-        // Ignore messages we sent ourselves — BroadcastChannel delivers to the sender too.
-        if (event.data && event.data.from === _TAB_ID) return;
-        _historyCache = null;
-        sessionStorage.removeItem(KEYS.SESSION_CACHE);
-        DataController.invalidate();
-        // Re-populate the RAM cache from IndexedDB before rendering.
-        // Without this, getActiveHistory() falls through to an empty fallback
-        // because the in-memory and session caches were just cleared.
+    function resetRefreshBtn(btn) { if (!btn) return; if (btn.dataset.timerId) { clearTimeout(btn.dataset.timerId); delete btn.dataset.timerId; } btn.style.color = ""; btn.style.opacity = "1"; if (btn.dataset.originalText) { btn.innerText = btn.dataset.originalText; delete btn.dataset.originalText; } }
+    function checkRefreshCooldown(btn) {
+        const now = Date.now();
+        // Prune clicks older than 60 seconds
+        while (_refreshClickLog.length > 0 && now - _refreshClickLog[0] > 60000) _refreshClickLog.shift();
+        _refreshClickLog.push(now);
+        if (_refreshClickLog.length <= 4) return false;
+        // Apply cooldown
+        btn.disabled = true;
+        btn.style.opacity = '0.45';
+        btn.style.color = '#666';
+        if (!btn.dataset.originalText) btn.dataset.originalText = btn.innerText;
+        let remaining = Math.ceil((60000 - (now - _refreshClickLog[0])) / 1000);
+        const updateTooltip = () => { btn.setAttribute('data-tooltip', TOOLTIPS.REFRESH_COOLDOWN(remaining)); };
+        updateTooltip();
+        const interval = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(interval);
+                btn.disabled = false;
+                btn.style.opacity = '';
+                btn.style.color = '';
+                btn.removeAttribute('data-tooltip');
+                if (btn.dataset.originalText) { btn.innerText = btn.dataset.originalText; delete btn.dataset.originalText; }
+                _refreshClickLog.length = 0;
+            } else {
+                updateTooltip();
+            }
+        }, 1000);
+        return true;
+    }
+    function incrementApiCount(n) { runtime.apiCallTotal += n; const hud = dom.apiHud; if (hud) hud.innerHTML = `API Calls: ${runtime.apiCallTotal}`; }
+    function saveViewState() { if (runtime.isSyncing) return; localStorage.setItem(KEYS.STATE, JSON.stringify(viewState)); }
+    function saveConfig() {
+        const c = {}; ALLOWED_CONFIG_KEYS.forEach(k => { if (userConfig[k] !== undefined) c[k] = userConfig[k]; });
+        localStorage.setItem(KEYS.CONFIG, JSON.stringify(c));
+    }
+    // Returns the current dual-state string for a sticker id from the in-memory cache.
+    // Format: first char = unlocked (+/-), second char = post-it cleared (+/-).
+    // Defaults to "--" (locked, uncleared) if no record exists yet.
+    function getStickerState(id) { const states = (_historyCache && _historyCache.meta && _historyCache.meta.stickers) ? _historyCache.meta.stickers : {}; return states[String(id)] || '--'; }
+    // Marks a sticker's post-it as permanently cleared (second char -> '+').
+    // Fires an async DB write and updates the in-memory cache. The cleared state is
+    // irreversible by design — once '+', it never goes back regardless of unlock status.
+    async function persistStickerCleared(id) {
         try {
-            const tx = DBManager._db.transaction(DBManager._STORE_NAME, 'readonly');
-            const req = tx.objectStore(DBManager._STORE_NAME).get(DBManager._KEY);
-            req.onsuccess = (e) => {
-                const stored = e.target.result;
-                if (stored) {
-                    const clean = sanitizeStorageRecord(stored);
-                    if (!clean.meta) clean.meta = {};
-                    const rebuilt = DataController._rebuildFromSeries(clean.series || [], clean.meta.baselineBreakdown || ZERO_BREAKDOWN);
-                    _historyCache = { meta: clean.meta, history: rebuilt.history, today: rebuilt.today };
-                    renderPanelContent();
-                }
-            };
-        } catch (e) { console.warn('BBGL: Cross-tab cache reload failed', e); }
-        if (dom.panel) renderPanelContent();
-    };
-
-    function sanitizeStorageRecord(s) {
-        if (!s || typeof s !== 'object') return { meta: { baselineBreakdown: { ...ZERO_BREAKDOWN } }, series: [] };
-        if (!s.meta) s.meta = {};
-        if (!s.meta.baselineBreakdown) s.meta.baselineBreakdown = { ...ZERO_BREAKDOWN };
-        if (!s.series || !Array.isArray(s.series)) s.series = [];
-
-        // Heal baseline types
-        const k = ['str', 'def', 'spd', 'dex'];
-        k.forEach(key => { if (s.meta.baselineBreakdown[key] !== undefined) s.meta.baselineBreakdown[key] = parseFloat(s.meta.baselineBreakdown[key]) || 0; });
-
-        // Heal series entry types (force numeric for math stability)
-        s.series.forEach(e => {
-            if (e.ts !== undefined) e.ts = parseInt(e.ts);
-            if (e.gain !== undefined) e.gain = parseFloat(e.gain);
-            if (e.after !== undefined) e.after = parseFloat(e.after);
-            if (e.cost !== undefined) e.cost = parseInt(e.cost);
-        });
-
-        return s;
+            const stored = await DBManager.getStorage();
+            if (!stored) return;
+            if (!stored.meta) stored.meta = {};
+            if (!stored.meta.stickers) stored.meta.stickers = {};
+            const key = String(id);
+            // Read unlock state from the in-memory cache (authoritative) not the DB.
+            // The DB's stickers object lags behind since getStickerMap() only writes to
+            // _historyCache. Reading the DB here would default to '--' and produce '-+'
+            // instead of the correct '++' for an unlocked-then-cleared sticker.
+            const cachedState = (_historyCache && _historyCache.meta && _historyCache.meta.stickers && _historyCache.meta.stickers[key]) || '--';
+            const newState = cachedState[0] + '+';
+            stored.meta.stickers[key] = newState;
+            await DBManager.setStorage(stored);
+            // Keep in-memory cache in sync
+            if (_historyCache) { if (!_historyCache.meta) _historyCache.meta = {}; if (!_historyCache.meta.stickers) _historyCache.meta.stickers = {}; _historyCache.meta.stickers[key] = newState; }
+        } catch (e) { console.warn('BBGL: Failed to persist sticker cleared state', e); }
     }
-
-    function validateImportSchema(j) {
-        if (!j || typeof j !== 'object') return { ok: false, msg: "Invalid file format." };
-        if (!j.storage || typeof j.storage !== 'object') return { ok: false, msg: "No training data found in file." };
-        const s = j.storage;
-        if (s.series && !Array.isArray(s.series)) return { ok: false, msg: "Training series is malformed (not an array)." };
-        if (s.meta && s.meta.baselineBreakdown) {
-            const keys = Object.keys(s.meta.baselineBreakdown);
-            if (!keys.includes('str') && !keys.includes('def')) return { ok: false, msg: "Baseline stats are missing or invalid." };
-        }
-        return { ok: true };
-    }
+    function getISOWeek(s) { const d = Formatter.parse(s), date = new Date(d.valueOf()); date.setUTCDate(date.getUTCDate() + 3 - (date.getUTCDay() + 6) % 7); const w1 = new Date(Date.UTC(date.getUTCFullYear(), 0, 4)); return 1 + Math.round(((date.getTime() - w1.getTime()) / 86400000 - 3 + (w1.getUTCDay() + 6) % 7) / 7); }
+    function computeWeekCompletion(days) { let tot = 0, numGold = 0, numGreen = 0; days.forEach(d => { const e = d.eSpent ? d.eSpent.total : 0; if (e >= 1500) { tot += 1500; numGold++; } else if (e >= 1000) { tot += 1000; numGreen++; } }); const isGold = numGold >= 3 && numGreen >= 3; return { isCompleted: isGold || tot >= GAME.WEEKLY_GOAL, isGold }; }
+    function getWeekKey(dateStr) { const d = Formatter.parse(dateStr); const dayIdx = d.getUTCDay(); const offset = userConfig.weekStartMode === 'mon' ? (dayIdx === 0 ? 6 : dayIdx - 1) : dayIdx; const weekStart = new Date(d.getTime() - offset * 86400000); return Formatter.dateISO(weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate()); }
 
     /**
-     *  [SECTION II] THE PHYSIQUE (Assets & Styles)
+     *  [SECTION III] THE PHYSIQUE (Assets & Styles)
      *  ========================================================================
      *  Aesthetic definitions. Because looking good is half the battle.
      *  The other half is violence.
      */
 
-    const ASSETS = { HEADER_IMG: "https://i.imgur.com/UpD8eza.jpeg", GRADIENT: `<defs><linearGradient id="bbgl_silver_grad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#d9d9d9;stop-opacity:1" /><stop offset="100%" style="stop-color:#999999;stop-opacity:1" /></linearGradient></defs>` };
+    const ASSETS = { HEADER_IMG: "https://i.imgur.com/vF4Vfbx.jpeg", GRADIENT: `<defs><linearGradient id="bbgl_silver_grad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#d9d9d9;stop-opacity:1" /><stop offset="100%" style="stop-color:#999999;stop-opacity:1" /></linearGradient></defs>` };
     const ICONS = {
         LOGO_PATH: `M211.832 39.06c-15.022 15.31-15.894 22.83-23.473 43.903 2.69 9.14 5.154 16.927 9.148 25.117 5.158.283 10.765.47 15.342.43-6.11-10.208-8.276-19.32-4.733-35.274 4.3 19.05 12.847 29.993 21.203 34.332 3.032-.334 5.957-.714 8.776-1.146-6.255-10.337-8.494-19.47-4.914-35.588 3.897 17.27 11.287 27.876 18.86 32.94 4.658-1.043 9.283-2.243 13.927-3.534-5.517-9.69-7.36-18.692-3.97-33.957 3.357 14.876 9.307 24.81 15.732 30.516a1528.16 1528.16 0 0 0 13.852-4.347c-.685-5.782-.416-12.187 1.064-19.115l1.883-8.8 17.603 3.76-1.88 8.804c-3.636 17.008 1.324 24.42 7.306 28.666 5.98 4.244 14.69 3.46 16.03 2.6l7.576-4.86 9.72 15.15c-3.857 2.34-7.9 5.44-11.822 7.06 18.65 27.678 32.183 61.465 24.756 93.55-2.365 9.474-6.03 18.243-11.715 24.986 12.725 12.13 21.215 22.026 31.032 34.5a691.95 691.95 0 0 0-11.692-7.37c-11.397-7.01-23.832-14.214-34.98-19.802-16.012-7.8-31.367-18.205-47.73-20.523-22.552-2.967-46.27 4.797-73.32 21.06 7.872 8.72 13.282 15.474 20.312 24.288-6.98-4.338-14.652-9.07-23.16-14.23-32.554-17.48-65.39-48.227-100.438-49.99-30.56-1.092-59.952 14.955-89.677 38.568L18 254.293V494h31.963c45.184-17.437 80.287-57.654 97.03-94.52l.25-.564.325-.52c9.463-15.252 11.148-29.688 16.79-44.732 5.645-15.044 16.907-29.718 41.884-38.756 4.353-2.16 5.07-1.415 8.633 1.395 30.468 24.01 57.29 32.02 83.24 32.35 32.61-1.557 58.442-9.882 85.682-19.38-3.966 3.528-8.77 7.21-13.986 10.762-15.323 10.436-34.217 19.928-46.304 24.8-14.716 2.006-28.36 2.416-41.967.616-9.96 12.09-25.574 20.358-37.35 26.673 63.92 14.023 115.88.91 167.386-22.896-9.522-1.817-19.008-3.692-27.994-5.42 31.634-4.422 64.984-3.766 94.705-3.53 4.084-.02 7.213-.453 8.7-.886 14.167-51.072-4.095-97.893-34.294-145.216-30.263-47.425-72.18-94.107-101.896-143.04-21.1-17.257-48.6-31.455-77.522-46.175-20.386 4.25-41.026 9.336-61.443 14.1zm85.385 70.49c-11.678 3.6-23.71 7.425-33.852 10.012 2.527 4.93 3.735 10.664 3.395 16.202 11.028.877 21.082-2.018 28.965-6.356 4.845-2.666 8.74-6.048 11.414-8.96-3.854-2.735-7.26-6.41-9.923-10.9zm-54.213 14.698c-11.76 1.143-24.59 2.362-35.06 2.236 2.39 4.772 3.78 12.067 8.51 14.84 11.18 1.164 20.6 1.997 29.91-1.746 5.435-3.214 1.818-15.058-3.36-15.33zm-34.98 209.332c-17.593 7.233-22.586 15.14-26.813 26.406-3.998 10.66-6.227 25.076-14.48 41.014 32.29-6.38 69.625-21.23 93.852-40.088-17.017-5.098-34.553-13.852-52.557-27.332zm9.318 71.385c-18.723 7.237-40.836 16.144-59.696 14.062C143.774 446.68 124.012 474.03 91.762 494h84.68c21.564-29.798 38.067-56.575 40.9-89.035z`,
         get LOGO() { return `<svg id="bbgl-header-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="24" height="24" style="margin-right: 4px;">${ASSETS.GRADIENT}<path fill="url(#bbgl_silver_grad)" d="${this.LOGO_PATH}"></path></svg>`; },
@@ -920,120 +901,277 @@
     }
 
     /**
-     *  [SECTION III] THE SUPPLEMENTS (Utility Belt)
+     *  [SECTION IV] THE CHECK-IN COUNTER (Data Storage & Network)
      *  ========================================================================
-     *  Performance enhancers. Pure, distilled efficiency to make the heavy
-     *  lifting easier.
+     *  All IndexedDB persistence and all API network access lives here.
+     *  API key is sent ONLY to api.torn.com. Log IDs: 5300-5303.
+     *  Data stored ONLY in local IndexedDB (bbgl_db). No external storage.
+     *  This section is reproduced verbatim in the Transparency Block of the
+     *  minified output for user security verification.
      */
 
-    const Formatter = {
-        number(n, d = 0) { return (n === undefined || n === null) ? '0' : n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); },
-        abbr(n, d = 1) { if (!n && n !== 0) return '0'; const abs = Math.abs(n); if (abs < 1000) return Math.floor(n).toString(); const tiers = [[1e15, 'q'], [1e12, 't'], [1e9, 'b'], [1e6, 'm'], [1e3, 'k']]; for (const [mag, suffix] of tiers) { if (abs >= mag) return (n / mag).toFixed(d) + suffix; } return Math.floor(n).toString(); },
-        rate(n, exp = false) { if (!n && n !== 0) return '0'; if (n < 1000) return this.number(n, exp ? 2 : 1); if (exp) return this.number(Math.floor(n), 0); return this.abbr(n, 1); },
-        dual(val, r = false) { let std, exp; if (r) { std = this.rate(val, false); exp = this.rate(val, true); } else { std = Math.abs(val) > 9999 ? this.abbr(val) : this.number(val); exp = (Math.abs(val) >= 1e9) ? this.abbr(val, 4) : this.number(val); } return `<span class="view-std">${std}</span><span class="view-exp">${exp}</span>`; },
-        axis(n) { if (n === 0) return '0'; const abs = Math.abs(n); let div = 1, s = ''; if (abs >= 1e12) { div = 1e12; s = 't'; } else if (abs >= 1e9) { div = 1e9; s = 'b'; } else if (abs >= 1e6) { div = 1e6; s = 'm'; } else if (abs >= 1e3) { div = 1e3; s = 'k'; } return Math.round(n / div) + s; },
-        parse(s) { if (!s) return new Date(); return new Date(s.includes('T') ? s : s + 'T00:00:00Z'); },
-        dateISO(y, m, d) { return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; },
-        dateLogical(ts = null) { const d = ts ? new Date(ts) : new Date(); return this.dateISO(TimeManager.year(d), TimeManager.month(d), TimeManager.date(d)); },
-        datePretty(s) { if (!s || s.includes('Summary')) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`; },
-        dateMonthDay(s) { if (!s) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`; },
-        dateFull(s) { if (!s || s.includes('Summary')) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`; }
-    };
-
-    const TooltipController = {
-        el: null, arrow: null, currentTarget: null,
-        init() { if (this.el) return; this.el = document.createElement('div'); this.el.id = 'bbgl-tooltip'; this.arrow = document.createElement('div'); this.arrow.id = 'bbgl-tooltip-arrow'; this.el.appendChild(this.arrow); document.body.appendChild(this.el); },
-        hide() { if (this.el) { this.el.style.display = 'none'; this.currentTarget = null; } },
-        show(html, rect) {
-            if (!this.el) this.init(); this.el.innerHTML = html; this.el.appendChild(this.arrow); this.el.style.display = 'block'; this.el.className = '';
-            const ttRect = this.el.getBoundingClientRect(), pad = 12, view = { w: window.innerWidth, h: window.innerHeight };
-            let side = 'top'; const fitsTop = (rect.top - ttRect.height - pad >= 0), fitsBot = (rect.bottom + ttRect.height + pad <= view.h);
-            if (fitsTop) side = 'top'; else if (fitsBot) side = 'bottom'; else side = 'left';
-            let x = 0, y = 0;
-            if (side === 'top') { x = rect.left + (rect.width / 2) - (ttRect.width / 2); y = rect.top - ttRect.height - pad; } else if (side === 'bottom') { x = rect.left + (rect.width / 2) - (ttRect.width / 2); y = rect.bottom + pad; } else { x = rect.left - ttRect.width - pad; y = rect.top + (rect.height / 2) - (ttRect.height / 2); }
-            if (x < 5) x = 5; if (x + ttRect.width > view.w - 5) x = view.w - ttRect.width - 5; if (y < 5) y = 5; if (y + ttRect.height > view.h - 5) y = view.h - ttRect.height - 5;
-            this.el.style.left = x + 'px'; this.el.style.top = y + 'px'; this.el.classList.add('pos-' + side);
-            this.arrow.style.marginLeft = ''; this.arrow.style.marginTop = '';
+    const DBManager = {
+        _db: null,
+        _DB_NAME: 'bbgl_db',
+        _STORE_NAME: 'history',
+        _KEY: 'main',
+        initDB() {
+            return new Promise((resolve, reject) => {
+                if (this._db) { resolve(this._db); return; }
+                const req = indexedDB.open(this._DB_NAME, 1);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(this._STORE_NAME)) {
+                        db.createObjectStore(this._STORE_NAME);
+                    }
+                };
+                req.onsuccess = (e) => { this._db = e.target.result; resolve(this._db); };
+                req.onerror = (e) => { console.error('BBGL: IndexedDB open failed', e); reject(e); };
+            });
         },
-        resolve(target) { return target.closest('[data-tooltip], [data-tooltip-html]'); },
-        handleHover(e) {
-            const t = this.resolve(e.target);
-            if (!t) { if (this.currentTarget) this.hide(); return; }
-            if (this.currentTarget === t) return; this.currentTarget = t;
-            const h = t.getAttribute('data-tooltip-html'), txt = t.getAttribute('data-tooltip');
-            if (h) this.show(h, t.getBoundingClientRect()); else if (txt) this.show('<div style="text-align:center; color:#ddd;">' + txt + '</div>', t.getBoundingClientRect()); else this.hide();
+        getStorage() {
+            return new Promise((resolve, reject) => {
+                if (!this._db) { resolve(null); return; }
+                try {
+                    const tx = this._db.transaction(this._STORE_NAME, 'readonly');
+                    const store = tx.objectStore(this._STORE_NAME);
+                    const req = store.get(this._KEY);
+                    req.onsuccess = () => resolve(sanitizeStorageRecord(req.result || null));
+                    req.onerror = (e) => { console.error('BBGL: IndexedDB read failed', e); reject(e); };
+                } catch (e) { reject(e); }
+            });
+        },
+        setStorage(data) {
+            return new Promise((resolve, reject) => {
+                if (!this._db) { resolve(); return; }
+                try {
+                    const tx = this._db.transaction(this._STORE_NAME, 'readwrite');
+                    const store = tx.objectStore(this._STORE_NAME);
+                    const req = store.put(data, this._KEY);
+                    tx.oncomplete = () => {
+                        _syncChannel.postMessage({ type: 'update', from: _TAB_ID });
+                        resolve();
+                    };
+                    tx.onerror = (e) => {
+                        const err = e.target.error;
+                        console.error('BBGL: IndexedDB write failed', err);
+                        if (err && err.name === 'QuotaExceededError') {
+                            alert("⚠️ STORAGE ERROR: Browser quota exceeded.\n\nYour data could not be saved. Please export your history and then 'Clear Data' to free up space.");
+                        }
+                        reject(err);
+                    };
+                } catch (e) { reject(e); }
+            });
+        },
+        clearStorage() {
+            return new Promise((resolve, reject) => {
+                if (!this._db) { resolve(); return; }
+                const tx = this._db.transaction(this._STORE_NAME, 'readwrite');
+                const store = tx.objectStore(this._STORE_NAME);
+                const req = store.delete(this._KEY);
+                req.onsuccess = () => { _syncChannel.postMessage({ type: 'update', from: _TAB_ID }); resolve(); };
+                req.onerror = (e) => { console.error('BBGL: IndexedDB clear failed', e); reject(e); };
+            });
         }
     };
 
-    function resetRefreshBtn(btn) { if (!btn) return; if (btn.dataset.timerId) { clearTimeout(btn.dataset.timerId); delete btn.dataset.timerId; } btn.style.color = ""; btn.style.opacity = "1"; if (btn.dataset.originalText) { btn.innerText = btn.dataset.originalText; delete btn.dataset.originalText; } }
-    function checkRefreshCooldown(btn) {
-        const now = Date.now();
-        // Prune clicks older than 60 seconds
-        while (_refreshClickLog.length > 0 && now - _refreshClickLog[0] > 60000) _refreshClickLog.shift();
-        _refreshClickLog.push(now);
-        if (_refreshClickLog.length <= 4) return false;
-        // Apply cooldown
-        btn.disabled = true;
-        btn.style.opacity = '0.45';
-        btn.style.color = '#666';
-        if (!btn.dataset.originalText) btn.dataset.originalText = btn.innerText;
-        let remaining = Math.ceil((60000 - (now - _refreshClickLog[0])) / 1000);
-        const updateTooltip = () => { btn.setAttribute('data-tooltip', TOOLTIPS.REFRESH_COOLDOWN(remaining)); };
-        updateTooltip();
-        const interval = setInterval(() => {
-            remaining--;
-            if (remaining <= 0) {
-                clearInterval(interval);
-                btn.disabled = false;
-                btn.style.opacity = '';
-                btn.style.color = '';
-                btn.removeAttribute('data-tooltip');
-                if (btn.dataset.originalText) { btn.innerText = btn.dataset.originalText; delete btn.dataset.originalText; }
-                _refreshClickLog.length = 0;
-            } else {
-                updateTooltip();
-            }
-        }, 1000);
-        return true;
-    }
-    function incrementApiCount(n) { runtime.apiCallTotal += n; const hud = dom.apiHud; if (hud) hud.innerHTML = `API Calls: ${runtime.apiCallTotal}`; }
-    function saveViewState() { if (runtime.isSyncing) return; localStorage.setItem(KEYS.STATE, JSON.stringify(viewState)); }
-    function saveConfig() {
-        const c = {}; ALLOWED_CONFIG_KEYS.forEach(k => { if (userConfig[k] !== undefined) c[k] = userConfig[k]; });
-        localStorage.setItem(KEYS.CONFIG, JSON.stringify(c));
-    }
-    // Returns the current dual-state string for a sticker id from the in-memory cache.
-    // Format: first char = unlocked (+/-), second char = post-it cleared (+/-).
-    // Defaults to "--" (locked, uncleared) if no record exists yet.
-    function getStickerState(id) { const states = (_historyCache && _historyCache.meta && _historyCache.meta.stickers) ? _historyCache.meta.stickers : {}; return states[String(id)] || '--'; }
-    // Marks a sticker's post-it as permanently cleared (second char -> '+').
-    // Fires an async DB write and updates the in-memory cache. The cleared state is
-    // irreversible by design — once '+', it never goes back regardless of unlock status.
-    async function persistStickerCleared(id) {
+    const _syncChannel = new BroadcastChannel('bbgl_sync');
+    _syncChannel.onmessage = async (event) => {
+        // Ignore messages we sent ourselves — BroadcastChannel delivers to the sender too.
+        if (event.data && event.data.from === _TAB_ID) return;
+        _historyCache = null;
+        sessionStorage.removeItem(KEYS.SESSION_CACHE);
+        DataController.invalidate();
+        // Re-populate the RAM cache from IndexedDB before rendering.
+        // Without this, getActiveHistory() falls through to an empty fallback
+        // because the in-memory and session caches were just cleared.
         try {
-            const stored = await DBManager.getStorage();
-            if (!stored) return;
-            if (!stored.meta) stored.meta = {};
-            if (!stored.meta.stickers) stored.meta.stickers = {};
-            const key = String(id);
-            // Read unlock state from the in-memory cache (authoritative) not the DB.
-            // The DB's stickers object lags behind since getStickerMap() only writes to
-            // _historyCache. Reading the DB here would default to '--' and produce '-+'
-            // instead of the correct '++' for an unlocked-then-cleared sticker.
-            const cachedState = (_historyCache && _historyCache.meta && _historyCache.meta.stickers && _historyCache.meta.stickers[key]) || '--';
-            const newState = cachedState[0] + '+';
-            stored.meta.stickers[key] = newState;
-            await DBManager.setStorage(stored);
-            // Keep in-memory cache in sync
-            if (_historyCache) { if (!_historyCache.meta) _historyCache.meta = {}; if (!_historyCache.meta.stickers) _historyCache.meta.stickers = {}; _historyCache.meta.stickers[key] = newState; }
-        } catch (e) { console.warn('BBGL: Failed to persist sticker cleared state', e); }
+            const tx = DBManager._db.transaction(DBManager._STORE_NAME, 'readonly');
+            const req = tx.objectStore(DBManager._STORE_NAME).get(DBManager._KEY);
+            req.onsuccess = (e) => {
+                const stored = e.target.result;
+                if (stored) {
+                    const clean = sanitizeStorageRecord(stored);
+                    if (!clean.meta) clean.meta = {};
+                    const rebuilt = DataController._rebuildFromSeries(clean.series || [], clean.meta.baselineBreakdown || ZERO_BREAKDOWN);
+                    _historyCache = { meta: clean.meta, history: rebuilt.history, today: rebuilt.today };
+                    renderPanelContent();
+                }
+            };
+        } catch (e) { console.warn('BBGL: Cross-tab cache reload failed', e); }
+        if (dom.panel) renderPanelContent();
+    };
+
+    function sanitizeStorageRecord(s) {
+        if (!s || typeof s !== 'object') return { meta: { baselineBreakdown: { ...ZERO_BREAKDOWN } }, series: [] };
+        if (!s.meta) s.meta = {};
+        if (!s.meta.baselineBreakdown) s.meta.baselineBreakdown = { ...ZERO_BREAKDOWN };
+        if (!s.series || !Array.isArray(s.series)) s.series = [];
+
+        // Heal baseline types
+        const k = ['str', 'def', 'spd', 'dex'];
+        k.forEach(key => { if (s.meta.baselineBreakdown[key] !== undefined) s.meta.baselineBreakdown[key] = parseFloat(s.meta.baselineBreakdown[key]) || 0; });
+
+        // Heal series entry types (force numeric for math stability)
+        s.series.forEach(e => {
+            if (e.ts !== undefined) e.ts = parseInt(e.ts);
+            if (e.gain !== undefined) e.gain = parseFloat(e.gain);
+            if (e.after !== undefined) e.after = parseFloat(e.after);
+            if (e.cost !== undefined) e.cost = parseInt(e.cost);
+        });
+
+        return s;
     }
-    function getISOWeek(s) { const d = Formatter.parse(s), date = new Date(d.valueOf()); date.setUTCDate(date.getUTCDate() + 3 - (date.getUTCDay() + 6) % 7); const w1 = new Date(Date.UTC(date.getUTCFullYear(), 0, 4)); return 1 + Math.round(((date.getTime() - w1.getTime()) / 86400000 - 3 + (w1.getUTCDay() + 6) % 7) / 7); }
-    function computeWeekCompletion(days) { let tot = 0, numGold = 0, numGreen = 0; days.forEach(d => { const e = d.eSpent ? d.eSpent.total : 0; if (e >= 1500) { tot += 1500; numGold++; } else if (e >= 1000) { tot += 1000; numGreen++; } }); const isGold = numGold >= 3 && numGreen >= 3; return { isCompleted: isGold || tot >= GAME.WEEKLY_GOAL, isGold }; }
-    function getWeekKey(dateStr) { const d = Formatter.parse(dateStr); const dayIdx = d.getUTCDay(); const offset = userConfig.weekStartMode === 'mon' ? (dayIdx === 0 ? 6 : dayIdx - 1) : dayIdx; const weekStart = new Date(d.getTime() - offset * 86400000); return Formatter.dateISO(weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate()); }
+
+    function validateImportSchema(j) {
+        if (!j || typeof j !== 'object') return { ok: false, msg: "Invalid file format." };
+        if (!j.storage || typeof j.storage !== 'object') return { ok: false, msg: "No training data found in file." };
+        const s = j.storage;
+        if (s.series && !Array.isArray(s.series)) return { ok: false, msg: "Training series is malformed (not an array)." };
+        if (s.meta && s.meta.baselineBreakdown) {
+            const keys = Object.keys(s.meta.baselineBreakdown);
+            if (!keys.includes('str') && !keys.includes('def')) return { ok: false, msg: "Baseline stats are missing or invalid." };
+        }
+        return { ok: true };
+    }
+
+    // ─── Network Layer ──────────────────────────────────────────────────────
+
+    async function universalFetch(mission, options = {}) {
+        if (runtime.demoMode) return { success: false, demo: true };
+        const { specId = null } = options;
+
+        // 1. API Key Validation
+        if (!userConfig.apiKey || userConfig.apiKey.length < 16) {
+            return { ok: false, error: 'API Key is missing or too short.' };
+        }
+
+        const ts = Date.now();
+        let reqs = [];
+
+        // 2. The Chisel (Build the Request Payload)
+        if (mission === 'TRAIN_SINGLE' && specId) {
+            reqs.push({ type: 'log', id: specId, url: `https://api.torn.com/user/?selections=log&log=${specId}&key=${userConfig.apiKey}&timestamp=${ts}` });
+        } else if (mission === 'BATTLESTATS_ONLY') {
+            reqs.push({ type: 'battlestats', url: `https://api.torn.com/user/?selections=battlestats&key=${userConfig.apiKey}&timestamp=${ts}` });
+        } else { // FULL_SYNC
+            reqs = [
+                { type: 'log', id: 5300, url: `https://api.torn.com/user/?selections=log&log=5300&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'log', id: 5301, url: `https://api.torn.com/user/?selections=log&log=5301&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'log', id: 5302, url: `https://api.torn.com/user/?selections=log&log=5302&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'log', id: 5303, url: `https://api.torn.com/user/?selections=log&log=5303&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'battlestats', url: `https://api.torn.com/user/?selections=battlestats&key=${userConfig.apiKey}&timestamp=${ts}` }
+            ];
+        }
+
+        incrementApiCount(reqs.length);
+
+        try {
+            // 3. The Execution
+            const res = await Promise.all(reqs.map(c => fetch(c.url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => ({ cfg: c, data: d }))));
+            const errObj = res.find(r => r.data.error);
+            if (errObj) {
+                const c = errObj.data.error.code, m = errObj.data.error.error;
+                throw new Error(m);
+            }
+
+            let logs = {}, bs = null;
+            res.forEach(r => {
+                if (r.cfg.type === 'log' && r.data.log) logs = { ...logs, ...r.data.log };
+                else if (r.cfg.type === 'battlestats') bs = r.data;
+            });
+
+            // 4. The Routing & Smart Escalation
+            if (mission === 'BATTLESTATS_ONLY') {
+                if (bs) {
+                    const d = getActiveHistory();
+                    let escalationNeeded = false;
+                    const m = [{ api: 'strength', abbr: 'str' }, { api: 'defense', abbr: 'def' }, { api: 'speed', abbr: 'spd' }, { api: 'dexterity', abbr: 'dex' }];
+
+                    // Tripwire: Did stats go up unexpectedly since we last checked?
+                    m.forEach(i => {
+                        const apiVal = bs[i.api];
+                        const localVal = d.today?.endBreakdown?.[i.abbr] || 0;
+                        if (apiVal > localVal) escalationNeeded = true;
+                    });
+
+                    if (escalationNeeded) {
+                        return universalFetch('FULL_SYNC', options); // Immediately escalate
+                    } else {
+                        await DataController.processDataPayload({}, bs); // No discrepancy, update safely via pipeline
+                    }
+                }
+                localStorage.setItem(KEYS.BS_SYNC, ts.toString());
+            } else { // FULL_SYNC & TRAIN_SINGLE both push through the master pipeline
+                if (mission === 'FULL_SYNC') {
+                    localStorage.setItem(KEYS.LAST_SYNC, ts.toString());
+                    localStorage.setItem(KEYS.BS_SYNC, ts.toString());
+                }
+                await DataController.processDataPayload(logs, bs);
+            }
+
+            return { ok: true };
+
+        } catch (e) {
+            console.error(e);
+            return { ok: false, error: e.message || 'Network Error' };
+        }
+    }
+
+    // UI wrapper for syncs that need button feedback (manual refresh, initial registration).
+    // Background syncs call universalFetch directly — they need no button state management.
+    async function syncWithFeedback(mission, options = {}) {
+        const btn = dom.refreshBtn;
+        if (btn) {
+            btn.style.opacity = "0.4";
+            if (!btn.dataset.originalText) btn.dataset.originalText = btn.innerText;
+            btn.innerText = "Syncing...";
+        }
+
+        const result = await universalFetch(mission, options);
+
+        if (result.ok) {
+            if (btn) {
+                btn.innerText = "Refreshed!"; btn.style.color = "#43a047"; btn.style.opacity = "1";
+                if (btn.dataset.timerId) clearTimeout(btn.dataset.timerId);
+                btn.dataset.timerId = setTimeout(() => { resetRefreshBtn(btn); }, 2000);
+            }
+        } else {
+            alert("Sync Error: " + result.error);
+            resetRefreshBtn(btn);
+        }
+    }
+
+    // Unified 10-Minute Background Manager
+    function startBackgroundSync() {
+        setInterval(() => {
+            const now = Date.now();
+            const lastFull = parseInt(localStorage.getItem(KEYS.LAST_SYNC) || '0');
+            // If it's been over 1 Hour (3,600,000 ms), Full Sync. Otherwise, Battlestats Only.
+            if (now - lastFull > 3600000) universalFetch('FULL_SYNC');
+            else universalFetch('BATTLESTATS_ONLY');
+        }, 600000); // 10 minutes
+    }
+
+    function checkStaleness() {
+        const lastFull = localStorage.getItem(KEYS.LAST_SYNC), now = Date.now();
+        if (!lastFull || (now - parseInt(lastFull) > 3600000)) universalFetch('FULL_SYNC');
+        else {
+            const lastBs = localStorage.getItem(KEYS.BS_SYNC);
+            if (!lastBs || (now - parseInt(lastBs) > 600000)) universalFetch('BATTLESTATS_ONLY');
+        }
+    }
+
+    function checkExitSync() {
+        const f = sessionStorage.getItem(KEYS.SESSION);
+        if (f === 'true' && !window.location.href.includes('gym.php')) {
+            universalFetch('FULL_SYNC');
+            sessionStorage.removeItem(KEYS.SESSION);
+        }
+    }
 
     /**
-     *  [SECTION VI] THE EXERCISE (Data Layer)
+     *  [SECTION V] THE EXERCISE (Data Logic)
      *  ========================================================================
      *  The grind. Turning raw inputs into cold, hard data. We don't just store
      *  history; we forge it.
@@ -1996,146 +2134,7 @@
     }
 
     /**
-     *  [SECTION IV] THE CHECK-IN COUNTER (Network Layer)
-     *  ========================================================================
-     *  Badge in. Smuggling data packets past the front desk. Fast, quiet, and
-     *  reliable. Now featuring Smart Escalation.
-     */
-
-    async function universalFetch(mission, options = {}) {
-        if (runtime.demoMode) return { success: false, demo: true };
-        const { specId = null } = options;
-
-        // 1. API Key Validation
-        if (!userConfig.apiKey || userConfig.apiKey.length < 16) {
-            return { ok: false, error: 'API Key is missing or too short.' };
-        }
-
-        const ts = Date.now();
-        let reqs = [];
-
-        // 2. The Chisel (Build the Request Payload)
-        if (mission === 'TRAIN_SINGLE' && specId) {
-            reqs.push({ type: 'log', id: specId, url: `https://api.torn.com/user/?selections=log&log=${specId}&key=${userConfig.apiKey}&timestamp=${ts}` });
-        } else if (mission === 'BATTLESTATS_ONLY') {
-            reqs.push({ type: 'battlestats', url: `https://api.torn.com/user/?selections=battlestats&key=${userConfig.apiKey}&timestamp=${ts}` });
-        } else { // FULL_SYNC
-            reqs = [
-                { type: 'log', id: 5300, url: `https://api.torn.com/user/?selections=log&log=5300&key=${userConfig.apiKey}&timestamp=${ts}` },
-                { type: 'log', id: 5301, url: `https://api.torn.com/user/?selections=log&log=5301&key=${userConfig.apiKey}&timestamp=${ts}` },
-                { type: 'log', id: 5302, url: `https://api.torn.com/user/?selections=log&log=5302&key=${userConfig.apiKey}&timestamp=${ts}` },
-                { type: 'log', id: 5303, url: `https://api.torn.com/user/?selections=log&log=5303&key=${userConfig.apiKey}&timestamp=${ts}` },
-                { type: 'battlestats', url: `https://api.torn.com/user/?selections=battlestats&key=${userConfig.apiKey}&timestamp=${ts}` }
-            ];
-        }
-
-        incrementApiCount(reqs.length);
-
-        try {
-            // 3. The Execution
-            const res = await Promise.all(reqs.map(c => fetch(c.url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => ({ cfg: c, data: d }))));
-            const errObj = res.find(r => r.data.error);
-            if (errObj) {
-                const c = errObj.data.error.code, m = errObj.data.error.error;
-                throw new Error(m);
-            }
-
-            let logs = {}, bs = null;
-            res.forEach(r => {
-                if (r.cfg.type === 'log' && r.data.log) logs = { ...logs, ...r.data.log };
-                else if (r.cfg.type === 'battlestats') bs = r.data;
-            });
-
-            // 4. The Routing & Smart Escalation
-            if (mission === 'BATTLESTATS_ONLY') {
-                if (bs) {
-                    const d = getActiveHistory();
-                    let escalationNeeded = false;
-                    const m = [{ api: 'strength', abbr: 'str' }, { api: 'defense', abbr: 'def' }, { api: 'speed', abbr: 'spd' }, { api: 'dexterity', abbr: 'dex' }];
-
-                    // Tripwire: Did stats go up unexpectedly since we last checked?
-                    m.forEach(i => {
-                        const apiVal = bs[i.api];
-                        const localVal = d.today?.endBreakdown?.[i.abbr] || 0;
-                        if (apiVal > localVal) escalationNeeded = true;
-                    });
-
-                    if (escalationNeeded) {
-                        return universalFetch('FULL_SYNC', options); // Immediately escalate
-                    } else {
-                        await DataController.processDataPayload({}, bs); // No discrepancy, update safely via pipeline
-                    }
-                }
-                localStorage.setItem(KEYS.BS_SYNC, ts.toString());
-            } else { // FULL_SYNC & TRAIN_SINGLE both push through the master pipeline
-                if (mission === 'FULL_SYNC') {
-                    localStorage.setItem(KEYS.LAST_SYNC, ts.toString());
-                    localStorage.setItem(KEYS.BS_SYNC, ts.toString());
-                }
-                await DataController.processDataPayload(logs, bs);
-            }
-
-            return { ok: true };
-
-        } catch (e) {
-            console.error(e);
-            return { ok: false, error: e.message || 'Network Error' };
-        }
-    }
-
-    // UI wrapper for syncs that need button feedback (manual refresh, initial registration).
-    // Background syncs call universalFetch directly — they need no button state management.
-    async function syncWithFeedback(mission, options = {}) {
-        const btn = dom.refreshBtn;
-        if (btn) {
-            btn.style.opacity = "0.4";
-            if (!btn.dataset.originalText) btn.dataset.originalText = btn.innerText;
-            btn.innerText = "Syncing...";
-        }
-
-        const result = await universalFetch(mission, options);
-
-        if (result.ok) {
-            if (btn) {
-                btn.innerText = "Refreshed!"; btn.style.color = "#43a047"; btn.style.opacity = "1";
-                if (btn.dataset.timerId) clearTimeout(btn.dataset.timerId);
-                btn.dataset.timerId = setTimeout(() => { resetRefreshBtn(btn); }, 2000);
-            }
-        } else {
-            alert("Sync Error: " + result.error);
-            resetRefreshBtn(btn);
-        }
-    }
-
-    // Unified 10-Minute Background Manager
-    function startBackgroundSync() {
-        setInterval(() => {
-            const now = Date.now();
-            const lastFull = parseInt(localStorage.getItem(KEYS.LAST_SYNC) || '0');
-            // If it's been over 1 Hour (3,600,000 ms), Full Sync. Otherwise, Battlestats Only.
-            if (now - lastFull > 3600000) universalFetch('FULL_SYNC');
-            else universalFetch('BATTLESTATS_ONLY');
-        }, 600000); // 10 minutes
-    }
-
-    function checkStaleness() {
-        const lastFull = localStorage.getItem(KEYS.LAST_SYNC), now = Date.now();
-        if (!lastFull || (now - parseInt(lastFull) > 3600000)) universalFetch('FULL_SYNC');
-        else {
-            const lastBs = localStorage.getItem(KEYS.BS_SYNC);
-            if (!lastBs || (now - parseInt(lastBs) > 600000)) universalFetch('BATTLESTATS_ONLY');
-        }
-    }
-
-    function checkExitSync() {
-        const f = sessionStorage.getItem(KEYS.SESSION);
-        if (f === 'true' && !window.location.href.includes('gym.php')) {
-            universalFetch('FULL_SYNC');
-            sessionStorage.removeItem(KEYS.SESSION);
-        }
-    }
-    /**
-     *  [SECTION V] THE EQUIPMENT (UI Layer)
+     *  [SECTION VI] THE GYM EQUIPMENT (UI Layer)
      *  ========================================================================
      *  The machinery. Constructing the gym from raw DOM elements. Heavy duty
      *  and built to last.
@@ -2775,7 +2774,7 @@
     }
 
     /**
-     *  [SECTION VII] THE MIRRORS (Graph Engine)
+     *  [SECTION VII] THE MIRRORS (Graph & Ledger Engine)
      *  ========================================================================
      *  Reflection. Visualizing the progress. Staring at your own curves
      *  (mathematically speaking).
@@ -3387,7 +3386,7 @@
     }
 
     /**
-     *  [SECTION IX] THE MOTIVATION (Controller Layer)
+     *  [SECTION IX] THE MOTIVATION (Init & Event Handling)
      *  ========================================================================
      *  The drive. The ghost in the machine that gets your ass in the gym and
      *  keeps the system moving.
