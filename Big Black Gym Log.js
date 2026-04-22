@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Big Black Gym Log
 // @namespace    http://tampermonkey.net/
-// @version      0.8.95
+// @version      0.9.00
 // @description  Your gym log script for Torn
-// @author       BigBlackHawk42069
+// @author       BigBlackHawk 
 // @match        https://www.torn.com/*
 // @grant        none
 // @updateURL    https://unguentary-gregorio-superabstractly.ngrok-free.dev/big-black-gym-log-minified.js
