@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         Big Black Gym Log
 // @namespace    http://tampermonkey.net/
 // @version      0.8.94
@@ -910,6 +910,12 @@
      *  minified output for user security verification.
      */
 
+    /*
+     * TRANSPARENCY NOTE: STORAGE
+     * The DBManager below handles saving your gym history.
+     * All data is stored STRICTLY LOCALLY in your browser's IndexedDB ('bbgl_db').
+     * Your data is NEVER uploaded to any external server or third-party database.
+     */
     const DBManager = {
         _db: null,
         _DB_NAME: 'bbgl_db',
@@ -977,14 +983,14 @@
 
     const _syncChannel = new BroadcastChannel('bbgl_sync');
     _syncChannel.onmessage = async (event) => {
-        // Ignore messages we sent ourselves — BroadcastChannel delivers to the sender too.
+
         if (event.data && event.data.from === _TAB_ID) return;
         _historyCache = null;
         sessionStorage.removeItem(KEYS.SESSION_CACHE);
         DataController.invalidate();
-        // Re-populate the RAM cache from IndexedDB before rendering.
-        // Without this, getActiveHistory() falls through to an empty fallback
-        // because the in-memory and session caches were just cleared.
+
+
+
         try {
             const tx = DBManager._db.transaction(DBManager._STORE_NAME, 'readonly');
             const req = tx.objectStore(DBManager._STORE_NAME).get(DBManager._KEY);
@@ -1008,11 +1014,11 @@
         if (!s.meta.baselineBreakdown) s.meta.baselineBreakdown = { ...ZERO_BREAKDOWN };
         if (!s.series || !Array.isArray(s.series)) s.series = [];
 
-        // Heal baseline types
+
         const k = ['str', 'def', 'spd', 'dex'];
         k.forEach(key => { if (s.meta.baselineBreakdown[key] !== undefined) s.meta.baselineBreakdown[key] = parseFloat(s.meta.baselineBreakdown[key]) || 0; });
 
-        // Heal series entry types (force numeric for math stability)
+
         s.series.forEach(e => {
             if (e.ts !== undefined) e.ts = parseInt(e.ts);
             if (e.gain !== undefined) e.gain = parseFloat(e.gain);
@@ -1035,13 +1041,20 @@
         return { ok: true };
     }
 
-    // ─── Network Layer ──────────────────────────────────────────────────────
 
+
+    /*
+     * TRANSPARENCY NOTE: NETWORK & API USAGE
+     * The universalFetch function below is the ONLY place this script contacts the internet.
+     * It connects STRICTLY to 'api.torn.com' and NEVER to any external servers.
+     * It ONLY requests Log IDs 5300, 5301, 5302, 5303 (your Gym Training logs) and your 'battlestats'.
+     * No other logs, items, money, or personal data are ever read or requested.
+     */
     async function universalFetch(mission, options = {}) {
         if (runtime.demoMode) return { success: false, demo: true };
         const { specId = null } = options;
 
-        // 1. API Key Validation
+
         if (!userConfig.apiKey || userConfig.apiKey.length < 16) {
             return { ok: false, error: 'API Key is missing or too short.' };
         }
@@ -1049,12 +1062,12 @@
         const ts = Date.now();
         let reqs = [];
 
-        // 2. The Chisel (Build the Request Payload)
+
         if (mission === 'TRAIN_SINGLE' && specId) {
             reqs.push({ type: 'log', id: specId, url: `https://api.torn.com/user/?selections=log&log=${specId}&key=${userConfig.apiKey}&timestamp=${ts}` });
         } else if (mission === 'BATTLESTATS_ONLY') {
             reqs.push({ type: 'battlestats', url: `https://api.torn.com/user/?selections=battlestats&key=${userConfig.apiKey}&timestamp=${ts}` });
-        } else { // FULL_SYNC
+        } else {
             reqs = [
                 { type: 'log', id: 5300, url: `https://api.torn.com/user/?selections=log&log=5300&key=${userConfig.apiKey}&timestamp=${ts}` },
                 { type: 'log', id: 5301, url: `https://api.torn.com/user/?selections=log&log=5301&key=${userConfig.apiKey}&timestamp=${ts}` },
@@ -1067,7 +1080,7 @@
         incrementApiCount(reqs.length);
 
         try {
-            // 3. The Execution
+
             const res = await Promise.all(reqs.map(c => fetch(c.url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => ({ cfg: c, data: d }))));
             const errObj = res.find(r => r.data.error);
             if (errObj) {
@@ -1081,14 +1094,14 @@
                 else if (r.cfg.type === 'battlestats') bs = r.data;
             });
 
-            // 4. The Routing & Smart Escalation
+
             if (mission === 'BATTLESTATS_ONLY') {
                 if (bs) {
                     const d = getActiveHistory();
                     let escalationNeeded = false;
                     const m = [{ api: 'strength', abbr: 'str' }, { api: 'defense', abbr: 'def' }, { api: 'speed', abbr: 'spd' }, { api: 'dexterity', abbr: 'dex' }];
 
-                    // Tripwire: Did stats go up unexpectedly since we last checked?
+
                     m.forEach(i => {
                         const apiVal = bs[i.api];
                         const localVal = d.today?.endBreakdown?.[i.abbr] || 0;
@@ -1096,13 +1109,13 @@
                     });
 
                     if (escalationNeeded) {
-                        return universalFetch('FULL_SYNC', options); // Immediately escalate
+                        return universalFetch('FULL_SYNC', options);
                     } else {
-                        await DataController.processDataPayload({}, bs); // No discrepancy, update safely via pipeline
+                        await DataController.processDataPayload({}, bs);
                     }
                 }
                 localStorage.setItem(KEYS.BS_SYNC, ts.toString());
-            } else { // FULL_SYNC & TRAIN_SINGLE both push through the master pipeline
+            } else {
                 if (mission === 'FULL_SYNC') {
                     localStorage.setItem(KEYS.LAST_SYNC, ts.toString());
                     localStorage.setItem(KEYS.BS_SYNC, ts.toString());
@@ -1118,8 +1131,8 @@
         }
     }
 
-    // UI wrapper for syncs that need button feedback (manual refresh, initial registration).
-    // Background syncs call universalFetch directly — they need no button state management.
+
+
     async function syncWithFeedback(mission, options = {}) {
         const btn = dom.refreshBtn;
         if (btn) {
@@ -1142,15 +1155,15 @@
         }
     }
 
-    // Unified 10-Minute Background Manager
+
     function startBackgroundSync() {
         setInterval(() => {
             const now = Date.now();
             const lastFull = parseInt(localStorage.getItem(KEYS.LAST_SYNC) || '0');
-            // If it's been over 1 Hour (3,600,000 ms), Full Sync. Otherwise, Battlestats Only.
+
             if (now - lastFull > 3600000) universalFetch('FULL_SYNC');
             else universalFetch('BATTLESTATS_ONLY');
-        }, 600000); // 10 minutes
+        }, 600000);
     }
 
     function checkStaleness() {
@@ -2128,7 +2141,9 @@
         if (confirm("⚠️ DEV FACTORY RESET ⚠️\n\nThis will completely wipe ALL data, settings, API keys, and cache. The script will emulate a completely fresh install.\n\nProceed?")) {
             await DBManager.clearStorage();
             localStorage.clear();
+            const devMode = sessionStorage.getItem(KEYS.DEV_MODE);
             sessionStorage.clear();
+            if (devMode) sessionStorage.setItem(KEYS.DEV_MODE, devMode);
             window.location.reload();
         }
     }
@@ -3979,7 +3994,8 @@
                     const rebuilt = DataController._rebuildFromSeries(stored.series || [], stored.meta.baselineBreakdown || ZERO_BREAKDOWN);
                     _historyCache = { meta: stored.meta, history: rebuilt.history, today: rebuilt.today };
                     sessionStorage.setItem(KEYS.SESSION_CACHE, JSON.stringify(_historyCache));
-                    if (!localStorage.getItem('bbgl_initialized')) localStorage.setItem('bbgl_initialized', '1');
+                    const hasData = rebuilt.history.length > 0 || (stored.meta && stored.meta.logStartDate);
+                    if (hasData && !localStorage.getItem('bbgl_initialized')) localStorage.setItem('bbgl_initialized', '1');
                 }
             } catch (e) { console.warn('BBGL: IndexedDB boot failed, continuing with empty state', e); }
         }
