@@ -6,8 +6,8 @@
 // @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
 // @grant        none
-// @updateURL    https://github.com/BigBlackHawk42069/Big-Black-Gym-Log/blob/main/Big-Black-Gym-Log.js
-// @downloadURL  https://github.com/BigBlackHawk42069/Big-Black-Gym-Log/blob/main/Big-Black-Gym-Log.js
+// @updateURL    https://raw.githubusercontent.com/BigBlackHawk42069/Big-Black-Gym-Log/refs/heads/main/Big-Black-Gym-Log.js
+// @downloadURL  https://raw.githubusercontent.com/BigBlackHawk42069/Big-Black-Gym-Log/refs/heads/main/Big-Black-Gym-Log.js
 // ==/UserScript==
 
 (function () {
