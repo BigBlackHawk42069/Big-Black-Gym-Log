@@ -2,12 +2,12 @@
 // @name         Big Black Gym Log
 // @namespace    http://tampermonkey.net/
 // @version      0.9.00
-// @description  Your gym log script for Torn
-// @author       BigBlackHawk 
+// @description  A high-fidelity, gamified stat tracker built to integrate seamlessly with Torn's native UI.
+// @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
 // @grant        none
-// @updateURL    https://unguentary-gregorio-superabstractly.ngrok-free.dev/big-black-gym-log-minified.js
-// @downloadURL  https://unguentary-gregorio-superabstractly.ngrok-free.dev/big-black-gym-log-minified.js
+// @updateURL    https://github.com/BigBlackHawk42069/Big-Black-Gym-Log/blob/main/Big-Black-Gym-Log.js
+// @downloadURL  https://github.com/BigBlackHawk42069/Big-Black-Gym-Log/blob/main/Big-Black-Gym-Log.js
 // ==/UserScript==
 
 (function () {
