@@ -1,0 +1,4016 @@
+// ==UserScript==
+// @name         Big Black Gym Log
+// @namespace    http://tampermonkey.net/
+// @version      0.8.94
+// @description  Your gym log script for Torn
+// @author       BigBlackHawk42069
+// @match        https://www.torn.com/*
+// @grant        none
+// @updateURL    https://unguentary-gregorio-superabstractly.ngrok-free.dev/big-black-gym-log.js
+// @downloadURL  https://unguentary-gregorio-superabstractly.ngrok-free.dev/big-black-gym-log.js
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    /**
+     *  [SECTION I] THE DIET PLAN (Meta & Globals)
+     *  ========================================================================
+     *  Essential macros. Where the magic numbers live. If this nutritional
+     *  foundation fails, we all atrophy.
+     */
+
+    const KEYS = { STORAGE: 'bbgl_storage_v1', STATE: 'bbgl_view_state_v1', CONFIG: 'bbgl_config_v1', SESSION: 'bbgl_trained_flag', LAST_SYNC: 'bbgl_last_data_sync_v1', BS_SYNC: 'bbgl_bs_last_sync_v1', API_CREDS: 'bbgl_api_auth_v1', SESSION_CACHE: 'bbgl_session_cache_v1', DEMO: 'bbgl_demo_mode', SB_NOTIF: 'bbgl_sb_notif_seen', DEV_MODE: 'bbgl_dev_mode' };
+    const CONSTANTS = { MONTHS: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], MONTHS_SHORT: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], COLORS: { STR: '#3264c6', DEF: '#dc3912', SPD: '#ff9900', DEX: '#109618', TOT: '#9d039d', GAINS: '#69f0ae' } };
+    const GAME = { WEEKLY_GOAL: 5000, STAT_MAP: { 5300: 'strength', 5301: 'defense', 5302: 'speed', 5303: 'dexterity' } };
+    const LAYOUT = { LIFT_HEIGHT: 43, BASE_RIGHT: 5 };
+    const PAGE_TITLES = ["Sweat Equity", "Casino Collection", "Frequent Felon Passport", "Memories of Misdemeanors", "Postcards from the Frontline"];
+    const DEFAULT_STICKER_URL = "https://i.imgur.com/Vv8hQ8l.png";
+    const CUSTOM_STICKERS = [{ id: 1, name: "Just Checking the Mirror", url: "https://i.imgur.com/pcmf4Za.png" }, { id: 2, name: "Up, Down, Repeat", url: "https://i.imgur.com/5c08jMg.png" }, { id: 3, name: "Flat Bench Therapy", url: "https://i.imgur.com/ZZrm1wV.png" }, { id: 4, name: "Bring Home the Feed", url: "https://i.imgur.com/mHOChuj.png" }, { id: 5, name: "Never Skip Leg Day", url: "https://i.imgur.com/a0GrcLD.png" }, { id: 6, name: "Tire Rotation", url: "https://i.imgur.com/yASJVvF.png" }, { id: 7, name: "Back End Engagement", url: "https://i.imgur.com/UkL8Xtd.png" }, { id: 8, name: "The Upside of Exercise", url: "https://i.imgur.com/vAcjK86.png" }, { id: 9, name: "Shellshock Stretches", url: "https://i.imgur.com/c4DG3TF.png" }, { id: 10, name: "Certified Cardio", url: "https://i.imgur.com/cw4Xu0D.png" }, { id: 11, name: "Just One More Spin", url: "https://i.imgur.com/iGbCjTw.png" }, { id: 12, name: "Bingo! I Think...", url: "https://i.imgur.com/GSYYGoG.png" }, { id: 13, name: "Lucky Shot", url: "https://i.imgur.com/OodKa2h.png" }, { id: 14, name: "Holy Craps", url: "https://i.imgur.com/Dj4M4qi.png" }, { id: 15, name: "Tilted in My Favor", url: "https://i.imgur.com/m19z2iz.png" }, { id: 16, name: "Red or Blue?", url: "https://i.imgur.com/BzQJxgU.png" }, { id: 17, name: "Hit Me", url: "https://i.imgur.com/A0YVd0S.png" }, { id: 18, name: "Dead Men’s Hand", url: "https://i.imgur.com/LAMVHDW.png" }, { id: 19, name: "Down the Barrel", url: "https://i.imgur.com/5vlhMxz.png" }, { id: 20, name: "Leslie's Day Off", url: "https://i.imgur.com/HvTqc9K.png" }];
+
+    let runtime = { isClosing: false, isViewAnimating: false, isSyncing: false, apiCallTotal: 0, resizeObserver: null, stickerSlots: [], stickerData: [], currentStickerPage: 0, viewerLoopId: null, viewerRotation: 0, viewerSpeed: 0.3, currentOpenedItemId: null, lastFrameTime: 0, returnView: null, layoutRafId: null, currentStats: null, demoMode: false, demoHistory: null, demoEnteredFrom: null, devMode: false };
+    const _TAB_ID = Math.random().toString(36).slice(2); // Unique ID for this tab instance
+    let _historyCache = null; // Data layer cache — intentionally separate from UI runtime state
+    const _refreshClickLog = []; // Timestamps of recent manual refresh clicks (for cooldown logic)
+    const dom = {};
+    let graphState = { activeStats: ['str', 'spd'], mode: 'values', isDragging: false, lockedStat: null, handlers: { scrub: null, start: null, end: null } };
+    let viewState = { expanded: false, isOpen: false, isTall: false, subView: 'ledger', graphMode: 'values', calYear: null, calMonth: null, activeViewLabel: null, currentStickerPage: 0 };
+    let calendarState = { year: new Date().getUTCFullYear(), month: new Date().getUTCMonth(), visibleCells: [], selectedLabel: null, selectedData: null };
+    let userConfig = { apiKey: '', dayStartMode: 'utc', weekStartMode: 'mon', animations: true, buttonLocation: 'both', ratesEnabled: true, privacyAgreed: '' };
+    const ALLOWED_CONFIG_KEYS = Object.keys(userConfig);
+    const r2 = (v) => Math.round(v * 100) / 100;
+    const ZERO_BREAKDOWN = Object.freeze({ str: 0, def: 0, spd: 0, dex: 0 });
+
+    const TimeManager = {
+        useLocal() { return userConfig.dayStartMode === 'local'; },
+        year(d) { return this.useLocal() ? d.getFullYear() : d.getUTCFullYear(); },
+        month(d) { return this.useLocal() ? d.getMonth() : d.getUTCMonth(); },
+        date(d) { return this.useLocal() ? d.getDate() : d.getUTCDate(); },
+        hours(d) { return this.useLocal() ? d.getHours() : d.getUTCHours(); },
+        minutes(d) { return this.useLocal() ? d.getMinutes() : d.getUTCMinutes(); },
+        now() { const d = new Date(); return { year: this.year(d), month: this.month(d), date: this.date(d) }; },
+        dayStartTs(dateStr) { const [y, m, d] = dateStr.split('-'); return this.useLocal() ? new Date(+y, +m - 1, +d).getTime() : Formatter.parse(dateStr).getTime(); }
+    };
+
+    const rawState = localStorage.getItem(KEYS.STATE);
+    if (rawState) { try { const saved = JSON.parse(rawState); viewState = { ...viewState, ...saved }; graphState.mode = (viewState.graphMode === 'gains' ? 'values' : viewState.graphMode) || 'values'; graphState.activeStats = viewState.graphStats || ['str', 'spd']; if (viewState.calYear) calendarState.year = viewState.calYear; if (viewState.calMonth !== null && viewState.calMonth !== undefined) calendarState.month = viewState.calMonth; } catch (e) { console.warn("BBGL: State load error", e); } }
+    const rawConfig = localStorage.getItem(KEYS.CONFIG);
+    if (rawConfig) {
+        try {
+            const parsed = JSON.parse(rawConfig);
+            ALLOWED_CONFIG_KEYS.forEach(k => { if (parsed[k] !== undefined) userConfig[k] = parsed[k]; });
+        } catch (e) { }
+    }
+    if (localStorage.getItem(KEYS.DEMO) === '1') runtime.demoMode = true;
+    if (sessionStorage.getItem(KEYS.DEV_MODE) === 'true') runtime.devMode = true;
+    if (!viewState.calYear) { const _n = TimeManager.now(); calendarState.year = _n.year; calendarState.month = _n.month; }
+
+    /**
+     *  [SECTION I-B] THE WAREHOUSE (IndexedDB Storage)
+     *  ========================================================================
+     *  Heavy-duty storage for the training history dataset. Bypasses the 5MB
+     *  localStorage cap entirely. Everything else stays in localStorage.
+     */
+
+    const DBManager = {
+        _db: null,
+        _DB_NAME: 'bbgl_db',
+        _STORE_NAME: 'history',
+        _KEY: 'main',
+        initDB() {
+            return new Promise((resolve, reject) => {
+                if (this._db) { resolve(this._db); return; }
+                const req = indexedDB.open(this._DB_NAME, 1);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(this._STORE_NAME)) {
+                        db.createObjectStore(this._STORE_NAME);
+                    }
+                };
+                req.onsuccess = (e) => { this._db = e.target.result; resolve(this._db); };
+                req.onerror = (e) => { console.error('BBGL: IndexedDB open failed', e); reject(e); };
+            });
+        },
+        getStorage() {
+            return new Promise((resolve, reject) => {
+                if (!this._db) { resolve(null); return; }
+                try {
+                    const tx = this._db.transaction(this._STORE_NAME, 'readonly');
+                    const store = tx.objectStore(this._STORE_NAME);
+                    const req = store.get(this._KEY);
+                    req.onsuccess = () => resolve(sanitizeStorageRecord(req.result || null));
+                    req.onerror = (e) => { console.error('BBGL: IndexedDB read failed', e); reject(e); };
+                } catch (e) { reject(e); }
+            });
+        },
+        setStorage(data) {
+            return new Promise((resolve, reject) => {
+                if (!this._db) { resolve(); return; }
+                try {
+                    const tx = this._db.transaction(this._STORE_NAME, 'readwrite');
+                    const store = tx.objectStore(this._STORE_NAME);
+                    const req = store.put(data, this._KEY);
+                    tx.oncomplete = () => {
+                        _syncChannel.postMessage({ type: 'update', from: _TAB_ID });
+                        resolve();
+                    };
+                    tx.onerror = (e) => {
+                        const err = e.target.error;
+                        console.error('BBGL: IndexedDB write failed', err);
+                        if (err && err.name === 'QuotaExceededError') {
+                            alert("⚠️ STORAGE ERROR: Browser quota exceeded.\n\nYour data could not be saved. Please export your history and then 'Clear Data' to free up space.");
+                        }
+                        reject(err);
+                    };
+                } catch (e) { reject(e); }
+            });
+        },
+        clearStorage() {
+            return new Promise((resolve, reject) => {
+                if (!this._db) { resolve(); return; }
+                const tx = this._db.transaction(this._STORE_NAME, 'readwrite');
+                const store = tx.objectStore(this._STORE_NAME);
+                const req = store.delete(this._KEY);
+                req.onsuccess = () => { _syncChannel.postMessage({ type: 'update', from: _TAB_ID }); resolve(); };
+                req.onerror = (e) => { console.error('BBGL: IndexedDB clear failed', e); reject(e); };
+            });
+        }
+    };
+
+    const _syncChannel = new BroadcastChannel('bbgl_sync');
+    _syncChannel.onmessage = async (event) => {
+        // Ignore messages we sent ourselves — BroadcastChannel delivers to the sender too.
+        if (event.data && event.data.from === _TAB_ID) return;
+        _historyCache = null;
+        sessionStorage.removeItem(KEYS.SESSION_CACHE);
+        DataController.invalidate();
+        // Re-populate the RAM cache from IndexedDB before rendering.
+        // Without this, getActiveHistory() falls through to an empty fallback
+        // because the in-memory and session caches were just cleared.
+        try {
+            const tx = DBManager._db.transaction(DBManager._STORE_NAME, 'readonly');
+            const req = tx.objectStore(DBManager._STORE_NAME).get(DBManager._KEY);
+            req.onsuccess = (e) => {
+                const stored = e.target.result;
+                if (stored) {
+                    const clean = sanitizeStorageRecord(stored);
+                    if (!clean.meta) clean.meta = {};
+                    const rebuilt = DataController._rebuildFromSeries(clean.series || [], clean.meta.baselineBreakdown || ZERO_BREAKDOWN);
+                    _historyCache = { meta: clean.meta, history: rebuilt.history, today: rebuilt.today };
+                    renderPanelContent();
+                }
+            };
+        } catch (e) { console.warn('BBGL: Cross-tab cache reload failed', e); }
+        if (dom.panel) renderPanelContent();
+    };
+
+    function sanitizeStorageRecord(s) {
+        if (!s || typeof s !== 'object') return { meta: { baselineBreakdown: { ...ZERO_BREAKDOWN } }, series: [] };
+        if (!s.meta) s.meta = {};
+        if (!s.meta.baselineBreakdown) s.meta.baselineBreakdown = { ...ZERO_BREAKDOWN };
+        if (!s.series || !Array.isArray(s.series)) s.series = [];
+
+        // Heal baseline types
+        const k = ['str', 'def', 'spd', 'dex'];
+        k.forEach(key => { if (s.meta.baselineBreakdown[key] !== undefined) s.meta.baselineBreakdown[key] = parseFloat(s.meta.baselineBreakdown[key]) || 0; });
+
+        // Heal series entry types (force numeric for math stability)
+        s.series.forEach(e => {
+            if (e.ts !== undefined) e.ts = parseInt(e.ts);
+            if (e.gain !== undefined) e.gain = parseFloat(e.gain);
+            if (e.after !== undefined) e.after = parseFloat(e.after);
+            if (e.cost !== undefined) e.cost = parseInt(e.cost);
+        });
+
+        return s;
+    }
+
+    function validateImportSchema(j) {
+        if (!j || typeof j !== 'object') return { ok: false, msg: "Invalid file format." };
+        if (!j.storage || typeof j.storage !== 'object') return { ok: false, msg: "No training data found in file." };
+        const s = j.storage;
+        if (s.series && !Array.isArray(s.series)) return { ok: false, msg: "Training series is malformed (not an array)." };
+        if (s.meta && s.meta.baselineBreakdown) {
+            const keys = Object.keys(s.meta.baselineBreakdown);
+            if (!keys.includes('str') && !keys.includes('def')) return { ok: false, msg: "Baseline stats are missing or invalid." };
+        }
+        return { ok: true };
+    }
+
+    /**
+     *  [SECTION II] THE PHYSIQUE (Assets & Styles)
+     *  ========================================================================
+     *  Aesthetic definitions. Because looking good is half the battle.
+     *  The other half is violence.
+     */
+
+    const ASSETS = { HEADER_IMG: "https://i.imgur.com/UpD8eza.jpeg", GRADIENT: `<defs><linearGradient id="bbgl_silver_grad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#d9d9d9;stop-opacity:1" /><stop offset="100%" style="stop-color:#999999;stop-opacity:1" /></linearGradient></defs>` };
+    const ICONS = {
+        LOGO_PATH: `M211.832 39.06c-15.022 15.31-15.894 22.83-23.473 43.903 2.69 9.14 5.154 16.927 9.148 25.117 5.158.283 10.765.47 15.342.43-6.11-10.208-8.276-19.32-4.733-35.274 4.3 19.05 12.847 29.993 21.203 34.332 3.032-.334 5.957-.714 8.776-1.146-6.255-10.337-8.494-19.47-4.914-35.588 3.897 17.27 11.287 27.876 18.86 32.94 4.658-1.043 9.283-2.243 13.927-3.534-5.517-9.69-7.36-18.692-3.97-33.957 3.357 14.876 9.307 24.81 15.732 30.516a1528.16 1528.16 0 0 0 13.852-4.347c-.685-5.782-.416-12.187 1.064-19.115l1.883-8.8 17.603 3.76-1.88 8.804c-3.636 17.008 1.324 24.42 7.306 28.666 5.98 4.244 14.69 3.46 16.03 2.6l7.576-4.86 9.72 15.15c-3.857 2.34-7.9 5.44-11.822 7.06 18.65 27.678 32.183 61.465 24.756 93.55-2.365 9.474-6.03 18.243-11.715 24.986 12.725 12.13 21.215 22.026 31.032 34.5a691.95 691.95 0 0 0-11.692-7.37c-11.397-7.01-23.832-14.214-34.98-19.802-16.012-7.8-31.367-18.205-47.73-20.523-22.552-2.967-46.27 4.797-73.32 21.06 7.872 8.72 13.282 15.474 20.312 24.288-6.98-4.338-14.652-9.07-23.16-14.23-32.554-17.48-65.39-48.227-100.438-49.99-30.56-1.092-59.952 14.955-89.677 38.568L18 254.293V494h31.963c45.184-17.437 80.287-57.654 97.03-94.52l.25-.564.325-.52c9.463-15.252 11.148-29.688 16.79-44.732 5.645-15.044 16.907-29.718 41.884-38.756 4.353-2.16 5.07-1.415 8.633 1.395 30.468 24.01 57.29 32.02 83.24 32.35 32.61-1.557 58.442-9.882 85.682-19.38-3.966 3.528-8.77 7.21-13.986 10.762-15.323 10.436-34.217 19.928-46.304 24.8-14.716 2.006-28.36 2.416-41.967.616-9.96 12.09-25.574 20.358-37.35 26.673 63.92 14.023 115.88.91 167.386-22.896-9.522-1.817-19.008-3.692-27.994-5.42 31.634-4.422 64.984-3.766 94.705-3.53 4.084-.02 7.213-.453 8.7-.886 14.167-51.072-4.095-97.893-34.294-145.216-30.263-47.425-72.18-94.107-101.896-143.04-21.1-17.257-48.6-31.455-77.522-46.175-20.386 4.25-41.026 9.336-61.443 14.1zm85.385 70.49c-11.678 3.6-23.71 7.425-33.852 10.012 2.527 4.93 3.735 10.664 3.395 16.202 11.028.877 21.082-2.018 28.965-6.356 4.845-2.666 8.74-6.048 11.414-8.96-3.854-2.735-7.26-6.41-9.923-10.9zm-54.213 14.698c-11.76 1.143-24.59 2.362-35.06 2.236 2.39 4.772 3.78 12.067 8.51 14.84 11.18 1.164 20.6 1.997 29.91-1.746 5.435-3.214 1.818-15.058-3.36-15.33zm-34.98 209.332c-17.593 7.233-22.586 15.14-26.813 26.406-3.998 10.66-6.227 25.076-14.48 41.014 32.29-6.38 69.625-21.23 93.852-40.088-17.017-5.098-34.553-13.852-52.557-27.332zm9.318 71.385c-18.723 7.237-40.836 16.144-59.696 14.062C143.774 446.68 124.012 474.03 91.762 494h84.68c21.564-29.798 38.067-56.575 40.9-89.035z`,
+        get LOGO() { return `<svg id="bbgl-header-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="24" height="24" style="margin-right: 4px;">${ASSETS.GRADIENT}<path fill="url(#bbgl_silver_grad)" d="${this.LOGO_PATH}"></path></svg>`; },
+        CLIPBOARD: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="100%" height="100%">${ASSETS.GRADIENT}<path fill="url(#bbgl_silver_grad)" d="M17,2.25V18H2V2.25H5.5l-2,2.106V16.5h12V4.356L13.543,2.25H17Zm-2.734,3L11.781,2.573V2.266A2.266,2.266,0,0,0,7.25,2.25v.323L4.777,5.25ZM9.5,1.5a.75.75,0,1,1-.75.75A.75.75,0,0,1,9.5,1.5ZM5.75,12.75h7.5v.75H5.75Zm0-.75h7.5v-.75H5.75Zm0-1.5h7.5V9.75H5.75Zm0-1.5h7.5V8.25H5.75Z"></path></svg>`,
+        MINIMIZE: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" class="bbgl-native-icon" aria-label="Minimize">${ASSETS.GRADIENT}<rect fill="url(#bbgl_silver_grad)" x="0" y="21" width="24" height="3"></rect></svg>`,
+        POPOUT: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="24" height="24" class="bbgl-native-icon">${ASSETS.GRADIENT}<path fill="url(#bbgl_silver_grad)" d="M12,12H6V6h6ZM4.5,6.621V4.5H6.621L4.061,1.939,6,0H0V6L1.939,4.061ZM6.621,13.5H4.5V11.379L1.939,13.94,0,12v6H6L4.061,16.06ZM13.5,11.379V13.5H11.379l2.561,2.56L12,18h6V12l-1.94,1.94L13.5,11.379ZM12,0l1.94,1.939L11.379,4.5H13.5V6.621l2.56-2.561L18,6V0Z"></path></svg>`,
+        MAXIMIZE: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="24" height="24" class="bbgl-native-icon">${ASSETS.GRADIENT}<g transform="translate(1290 304)"><path fill="url(#bbgl_silver_grad)" d="M-1277-291h6l-1.939,1.939,1.561,1.561-2.121,2.12-1.561-1.561L-1277-285Zm-9.94,4.06-1.561,1.561-2.12-2.12,1.561-1.561L-1291-291h6v6ZM-1284-292v-6h6v6Zm7-7v-6l1.939,1.94,1.561-1.561,2.121,2.121-1.561,1.561L-1271-299Zm-14,0,1.939-1.939-1.561-1.561,2.12-2.121,1.561,1.561L-1285-305v6Z"></path></g></svg>`,
+        CHART: `<svg viewBox="0 0 24 24"><path d="M7 19h2v-8H7v8zm4 0h2V5h-2v14zm4 0h2v-6h-2v6z"/></svg>`,
+        LEDGER: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="2" width="18" height="20" rx="2" fill="none"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg>`,
+        GRAPH: `<svg viewBox="0 0 24 24"><path d="M3,12 L7,16 L13,6 L18,14 L22,8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+        STICKERBOOK: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5" fill="none"/><circle cx="12" cy="5.5" r="3.5" fill="none"/><circle cx="18" cy="10" r="3.5" fill="none"/><circle cx="16" cy="17" r="3.5" fill="none"/><circle cx="8" cy="17" r="3.5" fill="none"/><circle cx="6" cy="10" r="3.5" fill="none"/></svg>`,
+        ACHIEVEMENTS: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" fill="none"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" fill="none"></path><path d="M4 22h16" fill="none"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" fill="none"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" fill="none"></path><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" fill="none"></path></svg>`,
+        PASTE: `<svg viewBox="0 0 24 24"><path d="M19,20H5V4H7V7H17V4H19M12,2A1,1 0 0,1 13,3A1,1 0 0,1 12,4A1,1 0 0,1 11,3A1,1 0 0,1 12,2M19,2H14.82C14.4,0.84 13.3,0 12,0C10.7,0 9.6,0.84 9.18,2H5A2,2 0 0,0 3,4V20A2,2 0 0,0 5,22H19A2,2 0 0,0 21,20V4A2,2 0 0,0 19,2Z"/></svg>`,
+        CHECK: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17 4 12" fill="none"/></svg>`,
+        CLOSE: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+    };
+
+    const CSS_STYLES = `
+    @import url('https://fonts.googleapis.com/css2?family=Fjalla+One&family=Roboto+Mono:wght@400;500;700&family=VT323&display=swap');
+    .bbgl-prefs-tab-title { background-image:linear-gradient(rgb(85,85,85) 0%,rgb(51,51,51) 100%); color:#fff; font-family:Arial,sans-serif; font-size:12px; font-weight:700; line-height:30px; padding-left:10px; border:1px solid #111; border-bottom:1px solid #000; box-shadow:inset 0 1px 0 rgba(255,255,255,0.1),0 1px 0 #444; border-radius:5px 5px 0 0; width:100%; box-sizing:border-box; margin:0; z-index:2; position:relative; }
+    .bbgl-prefs-tab-title:first-child { margin-top:0; }
+    .torn-btn { background-image:linear-gradient(rgb(17,17,17) 0%,rgb(85,85,85) 25%,rgb(51,51,51) 60%,rgb(51,51,51) 78%,rgb(17,17,17) 100%); color:#eee; font-family:"Fjalla One",Arial,serif; font-size:14px; font-weight:400; line-height:34px; padding:0; border:1px solid #111; border-radius:5px; width:100%; height:34px; cursor:pointer; text-align:center; text-transform:uppercase; box-sizing:border-box; display:block; transition:none; }
+    .torn-btn:hover { background-image:linear-gradient(rgb(51,51,51) 0%,rgb(119,119,119) 25%,rgb(51,51,51) 59%,rgb(102,102,102) 78%,rgb(51,51,51) 100%); color:#fff; }
+    .torn-btn:active { background-image:linear-gradient(#000 0%,#333 100%); color:#ddd; box-shadow:rgba(255,255,255,0.07) 0 -1px 0 0 inset; border-color:#ddd; }
+    .torn-btn-green { background-image:linear-gradient(#0e1806 0%,#3e5e22 25%,#2b4216 60%,#2b4216 78%,#0e1806 100%)!important; border-color:#0e1806!important; }
+    .torn-btn-green:hover { background-image:linear-gradient(#1a2e0b 0%,#4f782b 25%,#3a591e 60%,#3a591e 78%,#1a2e0b 100%)!important; }
+    .torn-btn-green:active { background-image:linear-gradient(#080f03 0%,#2b4216 100%)!important; border-color:#555!important; }
+    .torn-btn-red { background-image:linear-gradient(#200505 0%,#701a1a 25%,#4f0e0e 60%,#4f0e0e 78%,#200505 100%)!important; border-color:#200505!important; }
+    .torn-btn-red:hover { background-image:linear-gradient(#360808 0%,#942222 25%,#6e1313 60%,#6e1313 78%,#360808 100%)!important; }
+    .torn-btn-red:active { background-image:linear-gradient(#140303 0%,#4f0e0e 100%)!important; border-color:#555!important; }
+    .torn-btn-purple { background-image:linear-gradient(#1a0529 0%,#6a1b9a 25%,#4a1070 60%,#4a1070 78%,#1a0529 100%)!important; border-color:#1a0529!important; }
+    .torn-btn-purple:hover { background-image:linear-gradient(#2a0840 0%,#8e24aa 25%,#6a1b9a 60%,#6a1b9a 78%,#2a0840 100%)!important; }
+    .torn-btn-purple:active { background-image:linear-gradient(#0f0318 0%,#4a1070 100%)!important; border-color:#555!important; }
+    .bbgl-settings-body { background-color:#333; border:1px solid #111; border-top:none; border-radius:0 0 5px 5px; padding:4px 0; margin-bottom:5px; display:flex; flex-direction:column; box-shadow:inset 0 3px 5px rgba(0,0,0,0.2); }
+    .bbgl-setting-row { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:0 0; border-bottom:1px solid #1a1a1a; box-shadow:0 1px 0 #484848; font-family:Arial,sans-serif; font-size:13px; color:#ddd; }
+    .bbgl-setting-row:last-child { border-bottom:none; box-shadow:none; }
+    .bbgl-api-container { position:relative; width:100%; margin-bottom:8px; }
+    .bbgl-native-input { width:100%; background:#333; border:1px solid #555; color:#fff; padding:8px 30px; font-family:'Roboto Mono',monospace; font-size:12px; border-radius:4px; box-sizing:border-box; }
+    .bbgl-paste-icon { position:absolute; left:4px; top:50%; transform:translateY(-50%); cursor:pointer; width:22px; height:22px; display:flex; align-items:center; justify-content:center; user-select:none; z-index:15; }
+    .bbgl-paste-icon svg { fill:#888; transition:fill .2s; width:14px; height:14px; }
+    .bbgl-paste-icon:hover svg { fill:#fff; }
+    .bbgl-expanded .bbgl-paste-icon { width:26px; height:26px; }
+    .bbgl-expanded .bbgl-paste-icon svg { width:17px; height:17px; }
+    .bbgl-native-select { background:#333; color:#fff; border:1px solid #555; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer; }
+    .bbgl-switch { position:relative; display:inline-block; width:34px; height:18px; }
+    .bbgl-switch input { opacity:0; width:0; height:0; }
+    .slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#444; transition:.4s; border-radius:34px; }
+    .slider:before { position:absolute; content:""; height:12px; width:12px; left:3px; bottom:3px; background-color:#fff; transition:.4s; border-radius:50%; }
+    input:checked+.slider { background-color:${CONSTANTS.COLORS.GAINS}; }
+    input:checked+.slider:before { transform:translateX(16px); }
+    .bbgl-btn-grid { display:flex; gap:0; margin-bottom:0; }
+    .bbgl-btn-grid .torn-btn { flex:1; }
+    .bbgl-btn-grid .torn-btn:first-of-type { border-top-right-radius:0; border-bottom-right-radius:0; border-bottom-left-radius:0; border-right:none; }
+    .bbgl-btn-grid .torn-btn:last-of-type { border-top-left-radius:0; border-bottom-left-radius:0; border-bottom-right-radius:0; }
+    .bbgl-btn-stack { display:flex; flex-direction:column; width:100%; }
+    .bbgl-settings-body .bbgl-api-grid { display:flex!important; flex-direction:row!important; gap:0!important; margin:0 10px 10px!important; width:auto!important; }
+    .bbgl-api-grid .torn-btn { flex:1 1 0!important; margin:0!important; width:50%!important; }
+    .bbgl-api-grid .torn-btn:first-child { border-top-right-radius:0!important; border-bottom-right-radius:0!important; border-top-left-radius:5px!important; border-bottom-left-radius:5px!important; border-right:none!important; }
+    .bbgl-api-grid .torn-btn:last-child { border-top-left-radius:0!important; border-bottom-left-radius:0!important; border-top-right-radius:5px!important; border-bottom-right-radius:5px!important; }
+    .bbgl-btn-stack .torn-btn:first-child { border-bottom-left-radius:0; border-bottom-right-radius:0; border-top-left-radius:0; border-top-right-radius:0; border-bottom:none; z-index:1; }
+    .bbgl-btn-stack .torn-btn:last-child { border-top-left-radius:0; border-top-right-radius:0; }
+    .close-settings-btn { position:absolute; background:transparent; border:none; color:rgba(80,200,120,.7); cursor:pointer; z-index:200; transition:all .2s; user-select:none; top:12px; right:12px; width:22px; height:22px; display:flex; align-items:center; justify-content:center; padding:0; }
+    .close-settings-btn svg { width:100%; height:100%; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.5)); transition:all .2s; }
+    .close-settings-btn:hover { color:#69f0ae; transform:scale(1.1); filter:drop-shadow(0 0 6px rgba(105,240,174,.4)); }
+    .bbgl-close-x { color:rgba(220,80,80,.7)!important; }
+    .bbgl-close-x:hover { color:#ff6b6b!important; filter:drop-shadow(0 0 6px rgba(255,100,100,.4))!important; }
+    .bbgl-expanded .close-settings-btn { top:12px; right:16px; width:25px; height:25px; }
+    .bbgl-settings-body .bbgl-api-container { margin:8px 10px; width:auto; }
+    .bbgl-settings-body #updt-settings-btn { margin:0 10px 10px; width:calc(100% - 20px); display:block; }
+    .bbgl-settings-body .bbgl-btn-grid { margin:8px 10px 0; }
+    .bbgl-settings-body .bbgl-btn-stack { margin:0 10px 8px; width:auto; }
+    .area-desktop___bpqAS .active___vFLyM .defaultIcon___iiNis svg, .area-mobile___BH0Ku .active___vFLyM .defaultIcon___iiNis svg { fill:#fff; stroke:#fff; }
+    .active___b87hf { fill:#3498db!important; }
+    .bbgl-sb-notif .desktopLink___SG2RU { background:linear-gradient(to right,rgba(138,43,226,0.28),rgba(138,43,226,0.12)) !important; }
+    .bbgl-sb-notif .defaultIcon___iiNis svg { fill:#ce93d8 !important; stroke:#ce93d8 !important; filter:drop-shadow(0 0 3px rgba(156,39,176,0.6)) brightness(1.15) !important; }
+    .bbgl-sb-notif .mobileLink___xTgRa > span:not([class]) { color:#ce93d8 !important; }
+    #bbgl-page-container { display:flex; flex-direction:column; width:100%; min-height:calc(100vh - 60px); height:auto; padding:8px 0; box-sizing:border-box; }
+    .bbgl-native-header { display:flex; align-items:center; justify-content:space-between; padding:0 0 8px; margin-bottom:15px; border-bottom:1px solid #444; flex:0 0 auto; position:relative; }
+    .bbgl-native-header::after { content:""; position:absolute; bottom:-1px; left:0; width:100%; height:1px; background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.3) 50%,transparent 100%); }
+    .bbgl-native-title { font-family:Arial; font-weight:700; font-size:22px; color:#999; text-transform:capitalize; letter-spacing:.1px; display:flex; align-items:center; gap:10px; margin-left:-7px; padding-left:0; }
+    .bbgl-native-links { display:flex; gap:15px; font-size:18px; color:#999; font-weight:700; }
+    .bbgl-native-link { display:flex; align-items:center; gap:5px; cursor:pointer; transition:color .2s; }
+    .bbgl-native-link:hover { color:#ccc; }
+    .bbgl-native-link svg { width:20px; height:20px; fill:currentColor; }
+    #bbgl-panel { --bbgl-f-label:10px; --bbgl-f-top:10px; --bbgl-f-bot:9px; --bbgl-f-top-mb:1px; --bbgl-bot-minh:12px; --bbgl-col-gap:8px; --bbgl-label-case:uppercase; position:fixed; bottom:${LAYOUT.LIFT_HEIGHT}px; right:10px; z-index:999989; font-family:Arial,sans-serif; display:none; flex-direction:column; background:#2a2a2a; border:1px solid #444; border-radius:5px; box-shadow:0 -2px 4px rgba(0,0,0,0.35); width:300px; height:438.5px; max-height:calc(100vh - 50px)!important; overflow-y:auto; overflow-x:hidden; transition:width .3s cubic-bezier(0.25,1,0.5,1),height .3s cubic-bezier(0.25,1,0.5,1); }
+    #bbgl-panel.bbgl-expanded { --bbgl-f-label:13.5px; --bbgl-f-top:13.5px; --bbgl-f-bot:11.5px; --bbgl-f-top-mb:3px; --bbgl-bot-minh:14px; --bbgl-col-gap:11px; --bbgl-label-case:none; width:576px; height:633px; max-height:calc(100vh - 50px)!important; overflow-y:auto; overflow-x:hidden; }
+    #bbgl-panel.bbgl-tall { --bbgl-f-label:12px; --bbgl-f-top:12px; --bbgl-f-bot:11px; --bbgl-col-gap:13px; }
+    #bbgl-panel.bbgl-tall.bbgl-expanded { --bbgl-f-label:15.5px; --bbgl-f-top:15.5px; --bbgl-f-bot:13px; --bbgl-col-gap:20px; }
+    #bbgl-panel.bbgl-mode-page { position:relative!important; top:0!important; left:0!important; right:auto!important; bottom:auto!important; width:100%!important; flex:1; max-width:none!important; height:auto!important; max-height:none!important; border:1px solid #444!important; border-radius:5px!important; box-shadow:0 10px 30px rgba(0,0,0,0.5)!important; background:#2a2a2a!important; display:flex!important; flex-direction:column!important; gap:0!important; z-index:1!important; overflow:visible!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page { --bbgl-f-label:17px; --bbgl-f-top:18px; --bbgl-f-bot:15px; --bbgl-f-top-mb:4px; --bbgl-bot-minh:16px; --bbgl-col-gap:26px; }
+    #bbgl-panel.bbgl-expanded.bbgl-tall.bbgl-mode-page { --bbgl-f-label:17px; --bbgl-f-top:18px; --bbgl-f-bot:15px; --bbgl-col-gap:20px; }
+    .bbgl-mode-page .bbgl-header { display:none!important; }
+    .bbgl-mode-page #bbgl-content-wrapper { display:contents!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-top-panel { flex:0 0 270px!important; width:100%; margin-bottom:0!important; border:none!important; border-bottom:1px solid #444!important; border-radius:0!important; display:flex; flex-direction:column; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-header-wrapper { flex:0 0 246px!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-header-wrapper::before { left:4px!important; right:4px!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-month-header { padding-left:7px!important; padding-right:32px!important; gap:16px!important; }
+    .bbgl-mode-page #bbgl-bottom-panel { flex:1!important; width:100%; border:none!important; border-radius:0!important; background:0 0!important; min-height:0; display:flex; flex-direction:column; height:auto!important; overflow:visible!important; }
+    .bbgl-mode-page #bbgl-settings-view { flex:none; height:auto!important; }
+    .bbgl-mode-page .bbgl-settings-scroll-area { overflow-y:visible!important; height:auto!important; flex:none; }
+    .bbgl-mode-page:has(#bbgl-settings-view.active-view) { flex:none!important; }
+    .bbgl-mode-page:has(#bbgl-settings-view.active-view) #bbgl-bottom-panel { flex:none!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-grid-container { height:auto!important; flex:1; padding:0 4px 10px 4px!important; overflow:visible!important; }
+    .bbgl-mode-page .calendar-wrapper { height:auto!important; overflow:hidden!important; }
+    .bbgl-mode-page .bbgl-cal-container { height:auto!important; display:flex; flex-direction:column; }
+    .bbgl-mode-page .bbgl-row-slice { flex:none!important; width:100%; }
+    .bbgl-mode-page .bbgl-day-cell { aspect-ratio:1/1!important; height:auto!important; width:100%!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .ledger-content { height:auto!important; overflow:visible!important; padding-top:12px!important; padding-bottom:15px!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page:not(.mobile-mode) .ledger-content { padding-top:26px!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .day-num { top:6px!important; left:6px!important; font-size:18px!important; width:40px!important; height:40px!important; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-day-cell.is-viewing .day-num { font-size:24px!important; }
+    #bbgl-page-container.mobile-mode { height:auto!important; overflow-y:auto!important; padding:8px 0!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode { --bbgl-f-label:12.5px!important; --bbgl-f-top:12.5px!important; --bbgl-f-bot:10.5px!important; --bbgl-f-top-mb:2px!important; --bbgl-bot-minh:12px!important; --bbgl-col-gap:10px!important; --bbgl-label-case:uppercase!important; height:auto!important; overflow:visible!important; flex:none!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-top-panel { flex:0 0 180px!important; height:180px!important; overflow:hidden!important; margin-bottom:0!important; padding-top:2px!important; box-shadow:inset 0 0 40px rgba(0,0,0,0.95)!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .bbgl-header-wrapper { flex:0 0 135px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .bbgl-header-wrapper::before { left:4px!important; right:4px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .bbgl-month-header { padding-left:4px!important; padding-right:16px!important; gap:8px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .title-stack { gap:6px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #year-trigger { font-size:14px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #month-trigger { font-size:24px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .arrow-btn { font-size:20px!important; margin-bottom:4px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .bbgl-grid-container { padding:0 2px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .ledger-content { padding:26px 4px 8px!important; align-content:flex-start!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .col-header, #bbgl-panel.bbgl-mode-page.mobile-mode .col-data-block { margin-bottom:14px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .l-top { font-size:12px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .l-bot { font-size:10px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .c-label { font-size:12px!important; text-transform:none!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .all-time-btn { width:28px!important; height:28px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .day-num { top:2px!important; left:2px!important; font-size:10px!important; width:22px!important; height:22px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .bbgl-day-cell.is-viewing .day-num { font-size:14px!important; width:26px!important; height:26px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .ui-floating-label, #bbgl-panel.bbgl-mode-page.mobile-mode .ui-floating-summary { font-size:11px!important; bottom:4px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-graph-container { padding-top:32px!important; will-change:transform; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-cal-container { will-change: transform; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .bbgl-header-wrapper { will-change: transform; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .sticker-slot { height:65px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-sticker-grid { row-gap:10px!important; padding-top:16px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-sticker-title { font-size:10px!important; top:9px!important; right:8px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-sticker-pagination { bottom:-2px!important; gap:4px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .pg-dot { width:5px!important; height:5px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .sticker-nav-btn { font-size:18px!important; width:16px!important; height:20px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #sticker-prev-btn { left:6px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #sticker-next-btn { right:6px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .bbgl-week-row { font-size: 11px!important; padding-top: 3px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-item-viewer.active { height:calc(100vh - 420px)!important; min-height:300px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .viewer-window, #bbgl-panel.bbgl-mode-page.mobile-mode .viewer-stage, #bbgl-panel.bbgl-mode-page.mobile-mode .viewer-pedestal { width:85%!important; height:85%!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .viewer-obj { transform:rotateX(5deg) scale(1.55) translateY(25px) translateX(10px)!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .viewer-info-overlay { top:10px!important; left:10px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .vi-name { font-size:14px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode .vi-count { font-size:8px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #btn-close-viewer { font-size:9px!important; padding:2px 5px!important; top:4px!important; right:4px!important; }
+
+
+
+    .bbgl-mode-page #bbgl-close-btn, .bbgl-mode-page #bbgl-pop-btn, .bbgl-mode-page #bbgl-tall-toggle { display:none!important; }
+    .bbgl-mode-page #bbgl-ledger-toggle, .bbgl-mode-page #bbgl-graph-toggle, .bbgl-mode-page #bbgl-achievements-toggle, .bbgl-mode-page #bbgl-sticker-toggle, .bbgl-mode-page #bbgl-copy-btn { opacity:1!important; pointer-events:auto!important; }
+    .bbgl-mode-page #bbgl-ledger-toggle { left:10px!important; }
+    .bbgl-mode-page #bbgl-graph-toggle { left:40px!important; }
+    .bbgl-mode-page #bbgl-achievements-toggle { left:70px!important; }
+    .bbgl-mode-page #bbgl-sticker-toggle { left:100px!important; }
+    body.bbgl-page-mode-active #graph, body.bbgl-page-mode-active .tt-container.tt-theme-background.collapsible { display:none!important; }
+    #bbgl-gym-tab { background-image:linear-gradient(180deg,#00698c,#003040)!important; color:#fff!important; border:.1px solid #002431!important; border-bottom:none!important; border-radius:5px 5px 0 0!important; box-shadow:rgba(255,255,255,0.25) 0 0 4px 0 inset,rgba(0,0,0,0.5) 0 -2px 4px 0!important; width:38px!important; height:38px!important; display:flex!important; align-items:center!important; justify-content:center!important; margin:0 -1px 0 -.4px; padding:0!important; cursor:pointer!important; position:relative!important; z-index:-10!important; pointer-events:auto!important; }
+    #bbgl-gym-tab svg { transition:filter .2s ease; filter:drop-shadow(rgba(0,0,0,0.8) 0 0 2px); }
+    #bbgl-gym-tab:hover { background-image:linear-gradient(#0099cc,#004d66)!important; }
+    #bbgl-gym-tab:hover svg, #bbgl-gym-tab.bbgl-tab-active svg { filter:brightness(1.1) drop-shadow(rgba(0,0,0,0.8) 0 0 2px); }
+    #bbgl-gym-tab.bbgl-tab-active { background-image:linear-gradient(to bottom,#001F2B 0%,#003E53 100%)!important; box-shadow:inset 0 1px 0 0 #1a353f!important; border:none!important; padding:1px 1px 0!important; }
+    #bbgl-gym-tab.bbgl-tab-active:hover { background-image:linear-gradient(180deg,#003040,#00698c)!important; }
+    .bbgl-animate-pop { animation:bbgl-genie-pop .3s cubic-bezier(0.2,1,0.3,1) forwards; }
+    .bbgl-animate-vanish { animation:bbgl-genie-vanish .2s ease-in forwards; pointer-events:none; }
+    @keyframes bbgl-genie-pop{ 0%{transform:scale(0);opacity:0} 100%{transform:scale(1);opacity:1} }
+    @keyframes bbgl-genie-vanish{ 0%{transform:scale(1);opacity:1} 100%{transform:scale(0);opacity:0} }
+    .bbgl-header { background-image:linear-gradient(#00698c,#003040); color:#fff; font-family:Arial,sans-serif; font-size:12px; font-weight:700; text-transform:Title Case; padding:0 8px; border-bottom:1px solid #000; border-radius:5px 5px 0 0; box-shadow:rgba(255,255,255,0.25) 0 0 4px 0 inset,rgba(0,0,0,0.5) 0 -2px 4px 0; width:100%; height:38px; display:flex; align-items:center; justify-content:space-between; box-sizing:border-box; cursor:pointer; position:relative; z-index:50; user-select:none; }
+    .bbgl-header:hover { background-image:linear-gradient(#0099cc,#004d66); }
+    #bbgl-header-icon { transition:filter .2s; filter:drop-shadow(rgba(0,0,0,0.25) 0 0 2px); }
+    .bbgl-header:hover #bbgl-header-icon { filter:brightness(1.1) drop-shadow(rgba(0,0,0,0.25) 0 0 2px); }
+    .bbgl-header-left { display:flex; align-items:center; pointer-events:none; }
+    .bbgl-header-text { margin-left:2px; font-weight:700; }
+    .bbgl-short-title { display: inline; }
+    .bbgl-long-title { display: none; }
+    .bbgl-expanded .bbgl-short-title { display: none; }
+    .bbgl-expanded .bbgl-long-title { display: inline; }
+    .bbgl-header-right { display:flex; align-items:center; }
+    .bbgl-custom-icon { font-size:22px; color:#c0c0c0; cursor:pointer; margin:0 6px; font-weight:700; transition:color .2s; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; }
+    .bbgl-custom-icon:hover { color:#fff; }
+    #bbgl-close-btn { margin-left:12px; margin-right:16px; position:relative; top:-.5px; left:-.5px; }
+    #bbgl-pop-btn { margin-left:0; position:relative; top:.5px; left:.5px; }
+    #bbgl-pop-btn svg { pointer-events:bounding-box; }
+    .bbgl-native-icon { cursor:pointer; opacity:1; transition:filter .2s; filter:drop-shadow(rgba(0,0,0,0.25) 0 0 2px); }
+    .bbgl-native-icon:hover { filter:brightness(1.1) drop-shadow(rgba(0,0,0,0.25) 0 0 2px); }
+    #bbgl-tooltip { position:fixed; background-color:#464646; color:#ddd; font-family:Arial,sans-serif; font-size:12px; line-height:1.5; padding:6px 8px; border-radius:5px; box-shadow:none; filter:drop-shadow(0 0 1px rgba(0,0,0,0.5)); z-index:1000000; pointer-events:none; display:none; white-space:normal; height:auto; width:-moz-fit-content; width:fit-content; max-width:280px; }
+    #bbgl-tooltip strong { color:#fff; font-weight:700; }
+    #bbgl-tooltip i { display:block; margin-top:4px; color:#bbb; font-style:italic; font-size:11px; font-weight:400; }
+    .tt-header { color:#999; font-weight:700; border-bottom:1px solid #555; padding-bottom:4px; margin-bottom:6px; text-align:center; font-size:11px; letter-spacing:.5px; }
+    .tt-energy { text-align:center; margin-bottom:6px; color:#ddd; font-size:11px; font-weight:700; }
+    .tt-row { display:flex; justify-content:space-between; align-items:center; gap:15px; font-size:11px; margin-bottom:2px; }
+    .tt-label { color:#ccc; }
+    .tt-val { color:${CONSTANTS.COLORS.GAINS}; font-weight:700; }
+    .tt-total { color:#fff; font-weight:700; }
+    .tt-sub { font-size:10px; color:#999; }
+    #bbgl-tooltip-arrow { position:absolute; width:0; height:0; border:10px solid transparent; pointer-events:none; z-index:1000001; }
+    #bbgl-tooltip.pos-top #bbgl-tooltip-arrow { border-top-color:#444; bottom:-20px; left:50%; margin-left:-10px; }
+    #bbgl-tooltip.pos-bottom #bbgl-tooltip-arrow { border-bottom-color:#444; top:-20px; left:50%; margin-left:-10px; }
+    #bbgl-tooltip.pos-left #bbgl-tooltip-arrow { border-left-color:#444; right:-20px; top:50%; margin-top:-10px; }
+    #bbgl-tooltip.pos-right #bbgl-tooltip-arrow { border-right-color:#444; left:-20px; top:50%; margin-top:-10px; }
+    #bbgl-api-hud { position:fixed; top:10px; left:10px; z-index:999999; background:rgba(0,0,0,0.8); color:#76ff03; padding:5px 10px; border-radius:4px; font-family:'Consolas',monospace; font-size:12px; border:1px solid #333; pointer-events:none; box-shadow:0 2px 5px rgba(0,0,0,0.5); }
+    #bbgl-demo-exit { background-color:#4a1070; background-image:linear-gradient(180deg, #1a0529 0%, #6a1b9a 25%, #4a1070 60%, #4a1070 78%, #1a0529 100%); color:#fff; font-family:"Fjalla One",Arial,sans-serif; font-size:10px; font-weight:400; letter-spacing:1.5px; text-align:center; padding:2px 0; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.6); user-select:none; flex-shrink:0; transition:background-image 0.2s; border-top:1px solid #1a0529; border-bottom:1px solid #111; width:100%; border-radius:0; }
+    #bbgl-demo-exit:hover { background-image:linear-gradient(180deg, #2a0840 0%, #8e24aa 25%, #6a1b9a 60%, #6a1b9a 78%, #2a0840 100%); }
+    #bbgl-demo-exit:active { background-image:linear-gradient(0deg, #8e24aa 0%, #6a1b9a 100%); }
+    #bbgl-demo-exit-btn { color:#ab47bc!important; font-size:18px!important; }
+    #bbgl-demo-exit-btn:hover { color:#ce93d8!important; }
+    #bbgl-content-wrapper { flex:1; flex-shrink:0!important; background-color:#333; border:.1px solid #444; border-top:none; border-radius:0 0 5px 5px; display:flex; flex-direction:column; overflow:hidden; position:relative; }
+    #bbgl-top-panel { flex:0 0 30%; box-sizing:border-box; background-color:#2b2b2b; box-shadow:inset 0 0 40px rgba(0,0,0,0.95); border-bottom:1px solid #111; position:relative; overflow:hidden; display:flex; flex-direction:column; padding-top:2px; padding-bottom:8px; transition:flex-basis .3s,margin-bottom .3s,padding-top .3s; z-index:25; }
+    .bbgl-tall #bbgl-top-panel { flex:0 0 40%; margin-bottom:-13.41%; z-index:25; box-shadow:0 5px 15px rgba(0,0,0,0.5),inset 0 0 40px rgba(0,0,0,0.95); border-bottom:1px solid #333; padding-top:18px; }
+    .bbgl-expanded #bbgl-top-panel { flex:0 0 28%; }
+    .bbgl-expanded.bbgl-tall #bbgl-top-panel { flex:0 0 38%; margin-bottom:-10.35%; padding-top:20px; }
+    #bbgl-tall-toggle, #bbgl-ledger-toggle, #bbgl-graph-toggle, #bbgl-achievements-toggle, #bbgl-sticker-toggle, #bbgl-copy-btn { position:absolute; color:rgba(255,255,255,0.2); cursor:pointer; z-index:60; user-select:none; transition:all .2s; line-height:1; display:flex; align-items:center; justify-content:center; }
+    #bbgl-tall-toggle:hover, #bbgl-ledger-toggle:hover, #bbgl-graph-toggle:hover, #bbgl-achievements-toggle:hover, #bbgl-sticker-toggle:hover, #bbgl-copy-btn:hover { color:rgba(255,255,255,0.9); }
+    #bbgl-tall-toggle { top:3px; left:3px; font-size:15px; font-weight:700; width:19px; height:19px; }
+    #bbgl-ledger-toggle, #bbgl-graph-toggle, #bbgl-achievements-toggle, #bbgl-sticker-toggle, #bbgl-copy-btn { top:5.5px; width:14px; height:14px; z-index:59; opacity:0; pointer-events:none; transition:all .3s cubic-bezier(0.25,0.8,0.25,1); }
+    #bbgl-ledger-toggle svg, #bbgl-graph-toggle svg, #bbgl-achievements-toggle svg, #bbgl-sticker-toggle svg, #bbgl-copy-btn svg { width:14px; height:14px; fill:currentColor; }
+    #bbgl-ledger-toggle, #bbgl-ledger-toggle svg, #bbgl-achievements-toggle, #bbgl-achievements-toggle svg { width:13.5px; height:13.5px; }
+    .viewing-graph #bbgl-graph-toggle, .viewing-achievements #bbgl-achievements-toggle, .viewing-stickers #bbgl-sticker-toggle { color:#fff!important; text-shadow:0 0 5px rgba(255,255,255,0.8); }
+    #bbgl-top-panel:not(.viewing-graph):not(.viewing-stickers):not(.viewing-achievements) #bbgl-ledger-toggle { color:#fff!important; text-shadow:0 0 5px rgba(255,255,255,0.8); }
+    .bbgl-tall #bbgl-ledger-toggle { left:32px; opacity:1; pointer-events:auto; }
+    .bbgl-tall #bbgl-graph-toggle { left:57px; opacity:1; pointer-events:auto; }
+    .bbgl-tall #bbgl-achievements-toggle { left:82px; opacity:1; pointer-events:auto; }
+    .bbgl-tall #bbgl-sticker-toggle { left:107px; opacity:1; pointer-events:auto; }
+    .bbgl-tall #bbgl-copy-btn { right:8px; opacity:1; pointer-events:auto; }
+    .bbgl-expanded #bbgl-tall-toggle { top:3px; left:3px; font-size:15px; width:19px; height:19px; }
+    .bbgl-expanded.bbgl-tall #bbgl-ledger-toggle { width:15.5px; height:15.5px; left:32px; }
+    .bbgl-expanded.bbgl-tall #bbgl-graph-toggle { width:16px; height:16px; left:62px; }
+    .bbgl-expanded.bbgl-tall #bbgl-achievements-toggle { width:15.5px; height:15.5px; left:92px; }
+    .bbgl-expanded.bbgl-tall #bbgl-sticker-toggle { width:16px; height:16px; left:122px; }
+    .bbgl-expanded.bbgl-tall #bbgl-copy-btn { width:16px; height:16px; right:10px; }
+    #bbgl-panel.bbgl-mode-page #bbgl-ledger-toggle,
+    #bbgl-panel.bbgl-mode-page #bbgl-graph-toggle,
+    #bbgl-panel.bbgl-mode-page #bbgl-achievements-toggle,
+    #bbgl-panel.bbgl-mode-page #bbgl-sticker-toggle,
+    #bbgl-panel.bbgl-mode-page #bbgl-copy-btn { width:16px; height:16px; top:6px; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-ledger-toggle,
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-graph-toggle,
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-achievements-toggle,
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-sticker-toggle,
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-copy-btn { width:16.5px!important; height:16.5px!important; top:9px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-ledger-toggle,
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-achievements-toggle { width:16px!important; height:16px!important; }
+    #bbgl-panel.bbgl-mode-page.mobile-mode #bbgl-copy-btn { width:16.5px!important; height:16.5px!important; top:9px!important; }
+    #bbgl-panel.bbgl-mode-page #bbgl-ledger-toggle { left:32px; }
+    #bbgl-panel.bbgl-mode-page #bbgl-graph-toggle { left:62px; }
+    #bbgl-panel.bbgl-mode-page #bbgl-achievements-toggle { left:92px; }
+    #bbgl-panel.bbgl-mode-page #bbgl-sticker-toggle { left:122px; }
+    #bbgl-panel.bbgl-mode-page #bbgl-copy-btn { right:12px; }
+    .bbgl-expanded #bbgl-ledger-toggle svg, .bbgl-expanded #bbgl-graph-toggle svg, .bbgl-expanded #bbgl-achievements-toggle svg, .bbgl-expanded #bbgl-sticker-toggle svg, .bbgl-expanded #bbgl-copy-btn svg,
+    .bbgl-mode-page #bbgl-ledger-toggle svg, .bbgl-mode-page #bbgl-graph-toggle svg, .bbgl-mode-page #bbgl-achievements-toggle svg, .bbgl-mode-page #bbgl-sticker-toggle svg, .bbgl-mode-page #bbgl-copy-btn svg { width:100%!important; height:100%!important; }
+    #bbgl-top-panel::after { content:""; position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; box-shadow:inset 1px 1px 1px rgba(255,255,255,0.2),inset -1px -1px 2px rgba(0,0,0,0.6); background:radial-gradient(circle at center,rgba(0,0,0,0) 20%,rgba(0,0,0,0.5) 100%),repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.1) 2px,rgba(0,0,0,0.1) 4px); }
+    .glass-overlay { position:absolute; top:0; left:0; width:100%; height:100%; background-image:url('https://i.imgur.com/PfQV934.jpeg'); background-size:100% 100%; background-position:center; opacity:.5; pointer-events:none; mix-blend-mode:screen; z-index:11; border-radius:inherit; }
+    .ui-floating-label, .ui-floating-summary { position:absolute; bottom:3px; font-size:10px; font-weight:400; pointer-events:none; z-index:50; transition:font-size .3s; }
+    .ui-floating-label { left:8px; color:rgba(255,255,255,0.4); letter-spacing:.5px; }
+    .ui-floating-summary { right:8px; color:rgba(255,255,255,0.4); letter-spacing:.3px; text-align:right; }
+    .bbgl-expanded .ui-floating-label, .bbgl-expanded .ui-floating-summary { bottom:4px; font-size:12px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .ui-floating-label, #bbgl-panel.bbgl-expanded.bbgl-mode-page .ui-floating-summary { bottom:6px; font-size:16px; }
+    .viewing-graph .ui-floating-label, .viewing-graph .ui-floating-summary, .viewing-achievements .ui-floating-label, .viewing-achievements .ui-floating-summary { opacity:0; }
+    .viewing-stickers .ui-floating-label, .viewing-stickers .ui-floating-summary { display:none; }
+    #bbgl-top-panel.viewing-stickers { box-shadow:none!important; border-bottom:none!important; background-color:transparent!important; padding-bottom:2px!important; }
+    #bbgl-top-panel.viewing-stickers::after, #bbgl-top-panel.viewing-stickers .glass-overlay { display:none!important; }
+
+    .ledger-content { position:relative; flex:1; overflow-y:auto; overflow-x:hidden; padding:4px 2px; display:grid; grid-template-columns:repeat(4,1fr); gap:0; transition:opacity .3s; transform-origin:center; scrollbar-width:none; }
+    .viewing-graph #bbgl-ledger-view, .viewing-stickers #bbgl-ledger-view, .viewing-achievements #bbgl-ledger-view { display:none!important; }
+    .bbgl-expanded .ledger-content { grid-template-columns:repeat(4,1fr); padding-top:6px; }
+    .stat-column { display:flex; flex-direction:column; align-items:center; border-right:1px solid rgba(255,255,255,0.05); padding:0 2px; }
+    .stat-column:last-child { border-right:none; }
+    .col-header, .col-data-block { margin-bottom:var(--bbgl-col-gap); text-align:center; transition:margin-bottom .3s; width:100%; display:flex; flex-direction:column; align-items:center; }
+    .cell-stack { display:flex; flex-direction:column; align-items:center; justify-content:flex-start; line-height:1.2; }
+    .view-std { display:inline; }
+    .view-exp { display:none; }
+    .bbgl-expanded .view-std { display:none; }
+    .bbgl-expanded .view-exp { display:inline; }
+    .l-top { font-size:var(--bbgl-f-top); font-weight:550; color:#ddd; margin-bottom:var(--bbgl-f-top-mb); display:flex; align-items:center; justify-content:center; white-space:nowrap; letter-spacing:-.5px; transition:font-size .3s; }
+    .l-bot { font-size:var(--bbgl-f-bot); color:#ddd; min-height:var(--bbgl-bot-minh); height:auto; display:flex; align-items:center; justify-content:center; white-space:nowrap; transition:font-size .3s; }
+    .c-label { font-weight:700; font-family:'Arial',sans-serif; font-size:var(--bbgl-f-label); text-transform:var(--bbgl-label-case); letter-spacing:0; transition:font-size .3s; }
+    .c-gain .l-top { color:${CONSTANTS.COLORS.GAINS}; font-weight:550; }
+    .c-gain .l-bot { color:#bbb; font-style:normal; }
+    .c-total .l-top { color:#fff; }
+    .c-total .l-bot { color:#bbb; }
+    .t-str { color:${CONSTANTS.COLORS.STR}; }
+    .t-def { color:${CONSTANTS.COLORS.DEF}; }
+    .t-spd { color:${CONSTANTS.COLORS.SPD}; }
+    .t-dex { color:${CONSTANTS.COLORS.DEX}; }
+    .t-tot { color:${CONSTANTS.COLORS.TOT}; }
+    #bbgl-graph-container, #bbgl-achievements-container { display:none; flex:1; flex-direction:column; position:relative; z-index:20; }
+    .viewing-graph #bbgl-graph-container, .viewing-achievements #bbgl-achievements-container { display:flex; }
+    #bbgl-graph-container { padding:4px 10px; z-index:40; transform-origin:center; touch-action:none; cursor:crosshair; min-height:0; overflow:visible; }
+    .g-hud { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; z-index:60; position:relative; }
+    .g-toggles { display:flex; gap:2px; }
+    .g-pill { font-size:8.5px; padding:1px 5px; border:1px solid #444; border-radius:3px; color:#666; cursor:pointer; text-transform:uppercase; font-weight:700; background:#1a1a1a; transition:color .2s, background .2s, border-color .2s; user-select:none; white-space:nowrap; line-height:1.1; }
+    .g-pill:hover { color:#ccc; border-color:#666; }
+    .g-pill.active { color:var(--pill-c,#fff); background:var(--pill-bg,#333); border-color:var(--pill-c,#888); }
+    .g-pill.p-str { --pill-c:${CONSTANTS.COLORS.STR}; --pill-bg:rgba(229,115,115,0.1); }
+    .g-pill.p-def { --pill-c:${CONSTANTS.COLORS.DEF}; --pill-bg:rgba(100,181,246,0.1); }
+    .g-pill.p-spd { --pill-c:${CONSTANTS.COLORS.SPD}; --pill-bg:rgba(186,104,200,0.1); }
+    .g-pill.p-dex { --pill-c:${CONSTANTS.COLORS.DEX}; --pill-bg:rgba(255,183,77,0.1); }
+    .g-pill.p-tot { --pill-c:${CONSTANTS.COLORS.TOT}; --pill-bg:rgba(255,255,255,0.1); }
+    .bbgl-expanded .g-hud { margin-bottom:8px; }
+    .bbgl-expanded .g-toggles { gap:6px; }
+    .bbgl-expanded .g-pill { font-size:10px; padding:3px 8px; }
+    .bbgl-expanded .g-text { font-size:11px; }
+    #bbgl-graph-svg { width:100%; flex:1; overflow:visible; pointer-events:none; height:100%; display:block; }
+    .g-axis { stroke:rgba(255,255,255,0.1); stroke-width:1; }
+    .g-path { fill:none; stroke-width:2; vector-effect:non-scaling-stroke; stroke-linecap:round; transition:d .3s ease; }
+    .g-text { fill:rgba(255,255,255,0.4); font-size:9px; font-family:'Roboto Mono',monospace; user-select:none; }
+    .g-text.x-label { text-anchor:middle; font-family:'Fjalla One', sans-serif; font-size:11px; letter-spacing:0.5px; }
+    #bbgl-panel:not(.bbgl-expanded):not(.bbgl-mode-page) .g-text.x-label { font-size:10px; }
+    .g-text.y-label { text-anchor:end; }
+    .g-point-group .g-point-visual { opacity:0; transition:opacity .1s; stroke-width:1.5; pointer-events:none; }
+    .g-point-group.active .g-point-visual { opacity:1; }
+    #bbgl-sticker-bg { position:absolute; top:0; left:0; width:100%; height:100%; background-image:url('https://i.imgur.com/aElqCDE.png'); background-size:cover; background-position:center; z-index:5; opacity:0; transition:opacity .3s; pointer-events:none; }
+    .viewing-stickers #bbgl-sticker-bg { opacity:.9; }
+    #bbgl-sticker-container { display:none; flex:1; flex-direction:column; position:relative; padding:4px; z-index:40; transform-origin:center; overflow:hidden; justify-content:flex-start; }
+    .sticker-nav-btn { position:absolute; top:50%; transform:translateY(-60%); width:20px; height:25px; background:0 0; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:90; font-size:24px; font-weight:700; transition:transform 0.2s, text-shadow 0.2s; user-select:none; line-height:1; text-shadow:0 1px 3px #000; }
+    @media (hover: hover) { .sticker-nav-btn:hover { color:#fff; transform:translateY(-50%) scale(1.3); text-shadow:0 0 8px rgba(255,255,255,0.8); filter:none; } }
+    .sticker-nav-btn:active { color:#fff; transform:translateY(-50%) scale(1.3); text-shadow:0 0 8px rgba(255,255,255,0.8); filter:none; }
+    .sticker-nav-btn.disabled { opacity:0; pointer-events:none; }
+    .bbgl-expanded .sticker-nav-btn { font-size:32px; width:40px; }
+    .bbgl-expanded #sticker-prev-btn { left:-4px; }
+    .bbgl-expanded #sticker-next-btn { right:-4px; }
+    #sticker-prev-btn { left:0; border-radius:0 5px 5px 0; }
+    #sticker-next-btn { right:0; border-radius:5px 0 0 5px; }
+    .viewing-stickers #bbgl-sticker-container { display:flex; }
+    #bbgl-sticker-grid { position:relative; display:grid; grid-template-columns:repeat(5,1fr); grid-template-rows:auto auto; width:100%; height:100%; align-content:start; padding-top:0; row-gap:0; }
+    .sticker-slot { display:flex; align-items:center; justify-content:center; position:relative; overflow:visible; padding:0; height:60px; visibility:hidden; }
+    .sticker-slot.active-slot { visibility:visible; }
+    .bbgl-expanded .sticker-slot { height:95px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .sticker-slot { height:105px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-sticker-grid { row-gap:16px; padding-top:5px; }
+    .sticker-slot.has-item:hover { cursor:pointer; z-index:45; }
+    .sticker-img { height:80%; width:auto; max-width:140%; object-fit:contain; transition:transform .2s,filter 0s; filter:drop-shadow(0 -0.5px 0 rgba(0,0,0,0.3)) drop-shadow(0 0.5px 0 rgba(255,255,255,0.4)); }
+    .sticker-slot.locked .sticker-img { filter:brightness(0) invert(1) drop-shadow(0 -0.5px 0 rgba(0,0,0,0.2)) drop-shadow(0 0.5px 0 rgba(255,255,255,0.2)); opacity:.9; }
+    .bbgl-expanded .sticker-img { height:100%; max-width:100%; }
+    .bbgl-expanded .sticker-slot.locked .sticker-img { height:90%; width:100%; }
+    #bbgl-sticker-pagination { position:absolute; bottom:4px; width:100%; left:0; display:flex; align-items:center; justify-content:center; gap:6px; height:12px; z-index:100; }
+    .pg-dot { width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.25); cursor:pointer; transition:all .2s; }
+    .pg-dot.active { background:#fff; transform:scale(1.2); box-shadow:0 0 5px rgba(255,255,255,0.5); }
+    #bbgl-sticker-title { display:none; position:absolute; top:7px; right:10px; font-size:12px; color:#333; font-family:'Fjalla One',sans-serif; letter-spacing:.2px; z-index:99; pointer-events:none; mix-blend-mode:multiply; text-align:right; }
+    .viewing-stickers #bbgl-sticker-title { display:block; }
+    .bbgl-expanded #bbgl-sticker-title { font-size:15px; top:8px; right:20px; }
+    .bbgl-mode-page #bbgl-sticker-title { font-size:20px!important; top:10px!important; right:22px!important; }
+    .copy-hist-btn { position:absolute; top:4px; right:5px; width:14.5px; height:14.5px; cursor:pointer; z-index:90; transition:all .2s; user-select:none; opacity:0.6; display:none; align-items:center; justify-content:center; }
+    .bbgl-tall .copy-hist-btn, .bbgl-mode-page .copy-hist-btn { display:flex; }
+    .copy-hist-btn svg { width:100%!important; height:100%!important; margin:0!important; transition:all .2s; }
+    .copy-hist-btn:hover { opacity:1; transform:scale(1.1); filter:drop-shadow(0 0 5px rgba(255,255,255,0.4)); }
+    .viewing-stickers .copy-hist-btn { display:none!important; }
+    #bbgl-panel.bbgl-mode-page:not(.mobile-mode) .copy-hist-btn,
+    #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-ledger-toggle,
+    #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-graph-toggle,
+    #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-achievements-toggle,
+    #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-sticker-toggle { width:18px!important; height:18px!important; top:10px!important; }
+    #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-graph-container .g-hud { margin-top: 12px!important; margin-bottom: 6px!important; }
+    #bbgl-item-viewer { display:none; flex:1; width:100%; height:100%; background:radial-gradient(circle at center,#2e2e2e 0%,#1a1a1a 100%); flex-direction:column; align-items:center; justify-content:center; position:relative; border-top:1px solid #444; overflow:hidden; }
+    #bbgl-item-viewer.active { display:flex; }
+    .viewer-window { width:95%; height:100%; display:flex; align-items:center; justify-content:center; position:relative; }
+    .viewer-stage { width:100%; height:100%; position:center; perspective:400px; perspective-origin:center 50px; cursor:grab; }
+    .viewer-stage:active { cursor:grabbing; }
+    .viewer-pedestal { width:100%; height:100%; display:flex; align-items:center; justify-content:center; transform-style:preserve-3d; }
+    .viewer-obj { width:100%; height:100%; display:flex; align-items:center; justify-content:center; transform-style:preserve-3d; transform-origin:center 75%; transform:rotateX(8deg) scale(0.85) translateY(8px); }
+    .bbgl-expanded .viewer-obj { transform:rotateX(5deg) scale(0.75) translateY(-15px); }
+    .viewer-obj img { width:100%; height:100%; object-fit:contain; }
+    .layer-front { position:absolute; z-index:2; width:100%; height:100%; background-size:contain; background-repeat:no-repeat; background-position:center; backface-visibility:hidden; -webkit-backface-visibility:hidden; }
+    .layer-back { position:absolute; z-index:1; width:100%; height:100%; backface-visibility:hidden; -webkit-backface-visibility:hidden; background:#eee; background-image:linear-gradient(to bottom,rgba(255,255,255,0.8) 0%,rgba(200,200,200,1) 100%); transform:rotateY(180deg) scaleX(-1) translateZ(-1px); -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; -webkit-mask-position:center; mask-position:center; pointer-events:none; filter:brightness(var(--back-brightness,1)); }
+    .viewer-obj.is-image .layer-front::after { content:""; position:absolute; inset:0; -webkit-mask-image:var(--bg-mask); mask-image:var(--bg-mask); -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; -webkit-mask-position:center; mask-position:center; background:linear-gradient(115deg,transparent 25%,rgba(0,255,255,0.4) 40%,rgba(255,255,255,0.5) 50%,rgba(255,0,255,0.4) 60%,transparent 75%); background-size:250% 100%; background-position:var(--sheen-pos,0% 0%); mix-blend-mode:overlay; opacity:var(--sheen-opacity,1); pointer-events:none; transition:opacity .1s; }
+    .viewer-info-overlay { position:absolute; top:50px; left:10px; text-align:left; pointer-events:none; z-index:50; }
+    .vi-name { font-size:11px; color:#fff; font-weight:700; text-transform:none; }
+    .bbgl-expanded .viewer-info-overlay { top:75px; left:15px; }
+    .bbgl-expanded .vi-name { font-size:15px; }
+    .vi-count { font-size:9px; color:#aaa; margin-bottom:2px; }
+    #btn-close-viewer { position:absolute; top:5px; right:5px; background:0 0; border:1px solid #555; color:#888; font-size:10px; padding:2px 6px; cursor:pointer; border-radius:3px; pointer-events:auto; transition:all .2s; }
+    #btn-close-viewer:hover { border-color:#fff; color:#fff; background:#333; }
+    .bbgl-mode-page #bbgl-item-viewer.active { display:flex!important; width:100%!important; height:calc(100vh - 360px)!important; min-height:500px!important; border:none!important; border-radius:0 0 5px 5px!important; box-sizing:border-box!important; flex:none!important; }
+    .bbgl-mode-page .viewer-info-overlay { top:16px; left:15px; }
+    .bbgl-mode-page .vi-name { font-size:16px; }
+    .bbgl-mode-page.mobile-mode #bbgl-item-viewer { aspect-ratio:auto!important; }
+    .bbgl-mode-page .viewer-window, .bbgl-mode-page .viewer-stage, .bbgl-mode-page .viewer-pedestal { width:92%!important; height:92%!important; }
+    .bbgl-mode-page .viewer-obj { transform:rotateX(5deg) scale(1.22) translateY(20px) translateX(20px)!important; }
+    .bbgl-mode-page #bbgl-sticker-pagination { bottom:-2px!important; padding-bottom:0; }
+    #bbgl-bottom-panel { flex:1; display:flex; flex-direction:column; padding:0; box-sizing:border-box; overflow:hidden; will-change:transform; }
+    .bbgl-header-wrapper { position:relative; padding:4px 0 2px 10px; margin-bottom:0; border-bottom:none; flex:0 0 85px; overflow:visible; z-index:20; display:flex; flex-direction:column; justify-content:flex-end; transition:flex .3s cubic-bezier(0.25,1,0.5,1); }
+    .bbgl-header-wrapper::before { content:""; position:absolute; top:4px; left:4px; right:4px; bottom:0; width:auto; height:auto; background-image:url('${ASSETS.HEADER_IMG}'); background-size:100% 100%; background-position:center; opacity:1; z-index:-1; pointer-events:none; border-radius:3px 3px 0 0; clip-path:polygon(0 0,100% 0,100% 100%,0 100%); }
+    #bbgl-panel.bbgl-expanded .bbgl-header-wrapper { flex:0 0 130px; }
+    .bbgl-month-header { display:flex; justify-content:space-between; align-items:center; padding:0 8px 0 2px; gap:8px; position:relative; margin-bottom:1px; transition:margin-bottom .3s ease; }
+    #bbgl-panel.bbgl-expanded .bbgl-month-header { margin-bottom:6px; padding-left:50px; padding-right:60px; gap:12px; }
+    #bbgl-panel.bbgl-expanded .bbgl-header-wrapper::before { left:50px!important; right:50px!important; }
+    .arrow-btn { background:0 0; border:none; color:#fff; font-size:18px; cursor:pointer; padding:0 5px; font-weight:700; user-select:none; line-height:1; text-shadow:0 1px 3px #000; align-self:flex-end; margin-bottom:4px; transition: transform 0.2s, text-shadow 0.2s; }
+    @media (hover: hover) { .arrow-btn:hover { color:#fff; transform: scale(1.3); text-shadow: 0 0 8px rgba(255,255,255,0.8); } }
+    .arrow-btn:active { color:#fff; transform: scale(1.3); text-shadow: 0 0 8px rgba(255,255,255,0.8); }
+
+    .title-group { flex-grow:1; text-align:left; padding-left:2px; display:flex; flex-direction:row; justify-content:flex-start; align-items:center; gap:8px; }
+    .title-stack { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
+    #bbgl-panel.bbgl-expanded .title-stack { gap:6px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .title-stack { gap:10px; }
+    .all-time-btn { width:20px; height:20px; color:#ffd700; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .2s; margin-top:4px; margin-bottom:-4px; }
+    .all-time-btn:hover { transform:scale(1.1); filter:drop-shadow(0 0 5px rgba(255,215,0,0.6)); }
+    .all-time-btn svg { width:100%; height:100%; fill:currentColor; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.8)); }
+    .bbgl-expanded .all-time-btn { width:30px; height:30px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .all-time-btn { width:40px; height:40px; }
+    .header-row { display:flex; align-items:center; gap:6px; position:relative; }
+    #bbgl-panel:not(.bbgl-mode-page) .title-stack > .header-row:first-child { margin-bottom: -2px; }
+    #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .title-stack > .header-row:first-child { margin-bottom: -4px; }
+    .stats-btn { width:18px; height:18px; display:flex; align-items:center; justify-content:center; cursor:pointer; opacity:.9; transition:all .2s; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.8)); }
+    .stats-btn:hover { opacity:1; transform:scale(1.15); filter:drop-shadow(0 0 4px rgba(255,255,255,0.6)); }
+    .stats-btn svg { fill:#fff; width:100%; height:100%; }
+    .header-trigger { font-family:'Fjalla One','Arial Narrow',sans-serif; font-weight:400; color:#fff; cursor:pointer; text-transform:capitalize; user-select:none; text-shadow:0 2px 4px #000; transition:font-size .3s; line-height:1; }
+    .header-trigger:hover { opacity:.8; }
+    .header-trigger::after { content:'▼'; font-size:8px; opacity:.5; margin-left:3px; vertical-align:middle; position:relative; top:-1px; }
+    .header-trigger.disabled { cursor:default; pointer-events:none; }
+    .header-trigger.disabled::after { display:none; }
+    #year-trigger { font-size:10px; }
+    #month-trigger { font-size:14px; }
+    #bbgl-panel.bbgl-expanded #year-trigger { font-size:14px; }
+    #bbgl-panel.bbgl-expanded #month-trigger { font-size:20px; }
+    #bbgl-panel.bbgl-expanded .stats-btn { width:18px; height:18px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page #year-trigger { font-size:20px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page #month-trigger { font-size:30px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .stats-btn { width:26px; height:26px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .arrow-btn { font-size:28px; margin-bottom:6px; }
+    #bbgl-panel.bbgl-expanded.bbgl-mode-page .header-trigger::after { font-size:12px; }
+    .bbgl-dropdown-menu { position:absolute; top:100%; left:0; background:#222; border:1px solid #444; border-radius:4px; box-shadow:0 4px 15px rgba(0,0,0,0.95); z-index:100; display:none; padding:4px; gap:2px; }
+    .bbgl-dropdown-menu.show { display:grid; }
+    #bbgl-month-dropdown { grid-template-columns:repeat(3,1fr); min-width:140px; }
+    #bbgl-year-dropdown { display:none; flex:1; flex-direction:column; width:max-content; min-width:60px; }
+    #bbgl-year-dropdown.show { display:flex; }
+    .drop-item { padding:8px 12px; font-size:11px; color:#999; cursor:pointer; text-align:center; border-radius:3px; }
+    #bbgl-panel.bbgl-expanded .drop-item { font-size:13px; }
+    .drop-item:hover { background:#333; color:#fff; }
+    .drop-item.active { background:#ff5722; color:#fff; }
+    .bbgl-grid-container { flex:1; display:flex; flex-direction:column; padding:0 2px; overflow:hidden; min-height:0; position:relative; z-index:1; transition:padding .3s ease; }
+    #bbgl-panel.bbgl-expanded .bbgl-grid-container { padding:0 50px; }
+    .bbgl-week-row { display:grid; grid-template-columns:repeat(7,1fr); text-align:center; color:#888; font-size:10px; margin-bottom:0; font-family:'Fjalla One','Arial Narrow',sans-serif; padding-top:1px; border-top:none; flex:0 0 auto; }
+    #bbgl-panel.bbgl-expanded .bbgl-week-row { font-size: 13px; padding-top: 5px; margin-bottom: 2px; }
+    #bbgl-panel.bbgl-mode-page .bbgl-week-row { font-size: 15px; padding-top: 8px; margin-bottom: 4px; }
+    .bbgl-week-row span { border-right:1px solid rgba(255,255,255,0.05); }
+    .bbgl-week-row span:last-child { border-right:none; }
+    .calendar-wrapper { flex:1; display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; position:relative; -ms-overflow-style:none; scrollbar-width:none; background:#333; }
+    .bbgl-cal-container { display:flex; flex-direction:column; width:100%; touch-action:pan-y; border-top:1px solid rgba(255,255,255,0.05); border-left:1px solid rgba(255,255,255,0.05); }
+    .bbgl-row-slice { display:flex; width:100%; background-image:var(--bg-url); background-size:100% calc(100% * var(--total-rows)); background-position:center calc(var(--row-idx) * 100% / (var(--total-rows) - 1)); background-repeat:no-repeat; }
+    .bbgl-day-cell { flex:1; aspect-ratio:1/1; display:block; position:relative; cursor:pointer; background:0 0; box-shadow:none; border-bottom:1px solid rgba(255,255,255,0.05); border-right:1px solid rgba(255,255,255,0.05); transition:transform .1s; overflow:hidden; }
+    .bbgl-day-cell.empty { background:0 0; box-shadow:none; cursor:default; pointer-events:none; }
+    .bbgl-day-cell.is-plate { z-index:2; border-bottom:1px solid rgba(0,0,0,0.4); border-right:1px solid rgba(0,0,0,0.4); }
+    .bbgl-day-cell.ghost-cell .jewel-wrapper { opacity:.6; }
+    .jewel-wrapper { position:absolute; top:50%; left:53%; width:80%; height:78%; transform:translate(-50%,-50%); pointer-events:none; z-index:10; filter:drop-shadow(0 3px 2px rgba(0,0,0,0.5)); }
+    .jewel-asset { width:100%; height:100%; object-fit:contain; position:absolute; top:0; left:0; }
+    .jewel-shine { position:absolute; inset:0; pointer-events:none; -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; -webkit-mask-position:center; mask-position:center; }
+    @keyframes gold-roll{ 0%{background-position:200% 0%;opacity:0} 15%{opacity:1} 100%{background-position:50% 0%;opacity:1} }
+    .jewel-type-gold .jewel-asset { transform:rotate(90deg) scale(1.25); }
+    .jewel-type-gold .jewel-shine { transform: scale(1.2); filter: brightness(1.2); background:linear-gradient(135deg,transparent 25%,rgba(255,240,180,1) 45%,rgba(255,255,255,1.0) 50%,rgba(255,240,180,1) 55%,transparent 75%); background-size:200% auto; mix-blend-mode:soft-light; opacity:0; transition:opacity 0.2s; }
+    .jewel-type-green .jewel-asset { transform:scale(1.2); }
+    .jewel-type-green .jewel-shine { transform:scale(1.15); background:linear-gradient(120deg,transparent 10%,rgba(0,220,110,0.4) 28%,rgba(180,255,210,0.95) 40%,rgba(255,255,255,1.0) 50%,rgba(180,255,210,0.95) 60%,rgba(0,220,110,0.4) 72%,transparent 90%); background-size:300% auto; mix-blend-mode:screen; opacity:0; }
+    .jewel-type-green .jewel-shine-over { position:absolute; z-index:3; width:100%; height:100%; transform:scale(1.2); background:linear-gradient(120deg,transparent 0%,rgba(120,255,180,0.5) 41%,rgba(255,255,255,0.7) 50%,rgba(120,255,180,0.5) 59%,transparent 100%); background-size:300% auto; mix-blend-mode:soft-light; opacity:0; -webkit-mask-image:var(--jewel-mask); mask-image:var(--jewel-mask); -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; -webkit-mask-position:center; mask-position:center; }
+    @keyframes green-flash{ 0%{background-position:250% 0%;opacity:0} 20%{opacity:0.9} 100%{background-position:50% 0%;opacity:0.75} }
+    @keyframes green-flash-over{ 0%{background-position:250% 0%;opacity:0} 20%{opacity:0.72} 100%{background-position:50% 0%;opacity:0.95} }
+    .sticker-wrapper { position:absolute; top:50%; left:50%; width:80%; height:80%; transform:translate(-50%,-50%) rotate(var(--rot,0deg)); pointer-events:none; z-index:15; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.5)); }
+    .cell-sticker-deco { width:100%; height:100%; object-fit:contain; filter:brightness(0.9) sepia(0.2) contrast(1.1); transition:transform 0.2s; }
+    .new-sticker-post-it { position:absolute; top:4%; left:4%; width:92%; height:92%; background:url('https://i.imgur.com/dmSlCxL.png') no-repeat center / contain; z-index:20; filter:drop-shadow(-2px 4px 5px rgba(0,0,0,0.4)); transform-origin: top right; transition:transform 0.6s cubic-bezier(0.5, 0, 1, 1); cursor:pointer; transform: rotate(-5deg); }
+    .post-it-rip { transform: translateX(250%) translateY(-80%) rotate(75deg) scale(1.3)!important; pointer-events:none; }
+    .sticker-shine { position:absolute; inset:0; background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(200,250,255,0.001) 30%,rgba(255,255,255,0.01) 50%,rgba(255,200,220,0.001) 70%,rgba(255,255,255,0) 100%); background-size:400% 400%; background-position:var(--bg-x,50%) var(--bg-y,50%); mix-blend-mode:overlay; opacity:0; border-radius:4px; -webkit-mask-mode:alpha; mask-mode:alpha; -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; -webkit-mask-position:center; mask-position:center; }
+    @keyframes bbgl-auto-shimmer{ 0%{opacity:0.85;background-position:0% 0%} 100%{opacity:0.85;background-position:100% 100%} }
+    @keyframes bbgl-slide-in-l{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+    @keyframes bbgl-slide-in-r{from{transform:translateX(100%)}to{transform:translateX(0)}}
+    @keyframes bbgl-slide-out-l{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+    @keyframes bbgl-slide-out-r{from{transform:translateX(0)}to{transform:translateX(100%)}}
+    .bbgl-cal-ghost{position:absolute;top:0;left:0;width:100%;pointer-events:none;z-index:10;}
+
+    /* --- Unified shimmer system: .shimmer-active and .is-viewing both drive cell animations --- */
+    .bbgl-day-cell:is(.shimmer-active,.is-viewing) .jewel-type-gold .jewel-shine { opacity:1; animation:gold-roll 1.2s cubic-bezier(0.3, 0, 0.55, 1) 1 forwards; }
+    .bbgl-day-cell:is(.shimmer-active,.is-viewing) .jewel-type-green .jewel-shine { opacity:1; animation:green-flash 1.7s ease-out 1 forwards; }
+    .bbgl-day-cell:is(.shimmer-active,.is-viewing) .jewel-type-green .jewel-shine-over { opacity:1; animation:green-flash-over 1.7s ease-out 1 forwards; }
+    .bbgl-day-cell:is(.shimmer-active,.is-viewing) .sticker-shine { animation:bbgl-auto-shimmer 2.4s cubic-bezier(0.3, 0, 0.55, 1) 2 alternate forwards; opacity:1; }
+
+    .day-num { position:absolute; top:3px; left:2px; font-size:10px; width:18px; height:18px; color:#fff; font-weight:400; font-family:'Fjalla One','Arial',sans-serif; pointer-events:none; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:all .2s; z-index:20; }
+    #bbgl-panel.bbgl-expanded .day-num { font-size:13px; width:30px; height:30px; }
+    .bbgl-day-cell.ghost-cell .day-num { color:#999; }
+    .bbgl-day-cell:not(.empty):not(.is-viewing):hover .day-num { color:#fff; background:#555; transform:scale(1); }
+    .bbgl-day-cell.is-viewing .day-num { color:#fff; background:#888; transform:none; z-index:50; font-size:13px!important; }
+    #bbgl-panel.bbgl-expanded .bbgl-day-cell.is-viewing .day-num { font-size:19px!important; }
+    .bbgl-weekly-anchor { width:100%; height:6px; position:relative; z-index:20; }
+    .bbgl-weekly-track { position:absolute; bottom:0; left:0; width:100%; height:6px; display:flex; cursor:pointer; transition:height .2s cubic-bezier(0.18,0.89,0.32,1.28); border-radius:0 4px 4px 0; overflow:hidden; pointer-events:auto; background:repeating-linear-gradient(90deg,transparent 0,transparent 1px,rgba(255,255,255,0.03) 1px,rgba(255,255,255,0.03) 2px),linear-gradient(180deg,#1a1a1a 0%,#2a2a2a 100%); box-shadow:inset 0 2px 5px rgba(0,0,0,0.8),inset 0 -1px 0 rgba(255,255,255,0.05),0 0 1px #000; }
+    .bbgl-weekly-track:hover { height:12px; z-index:100; }
+    .bbgl-weekly-track.is-viewing { height:12px; z-index:80; box-shadow:0 0 5px rgba(255,255,255,0.3),inset 0 2px 5px rgba(0,0,0,0.8); }
+    .bbgl-weekly-track.is-viewing .bbgl-track-label { opacity:1; }
+    .bbgl-weekly-track.track-solidified { background:repeating-linear-gradient(90deg,transparent 0,transparent 1px,rgba(0,0,0,0.15) 1px,rgba(0,0,0,0.15) 2px),linear-gradient(180deg,#333 0%,#555 30%,#999 60%,#555 70%,#222 100%); box-shadow:inset 0 0 2px rgba(255,255,255,0.2),0 1px 2px rgba(0,0,0,0.8); border-top:1px solid rgba(255,255,255,0.1); z-index:1; }
+    .bbgl-weekly-track.track-solidified .bbgl-seg { box-shadow:none; border-right:1px solid rgba(0,0,0,0.3); }
+    .bbgl-weekly-track.track-polished { box-shadow:0 1px 3px rgba(0,0,0,0.5); }
+    .bbgl-weekly-track.track-polished::after { content:""; position:absolute; top:0; bottom:0; left:0; width:100%; background:linear-gradient(90deg,transparent,rgba(255,255,255,0.5),transparent); opacity:.7; pointer-events:none; z-index:50; animation:bbgl-sheen-loop 7s linear infinite; }
+    @keyframes bbgl-sheen-loop{ 0%{transform:skewX(-20deg) translateX(-150%)} 21%{transform:skewX(-20deg) translateX(250%)} 21.01%,100%{transform:skewX(-20deg) translateX(-150%)} }
+    #bbgl-panel.bbgl-no-animations .bbgl-day-cell.is-viewing :is(.jewel-type-gold .jewel-shine, .jewel-type-green .jewel-shine, .jewel-type-green .jewel-shine-over, .sticker-shine) { animation:none!important; opacity:0!important; }
+    #bbgl-panel.bbgl-no-animations .bbgl-weekly-track.track-polished::after { display:none; }
+    #bbgl-panel.bbgl-no-rates .g-pill[data-val="rates"] { display:none; }
+    #bbgl-panel.bbgl-no-rates .c-gain.cell-stack, #bbgl-panel.bbgl-no-rates .c-gain { justify-content:center; }
+    #bbgl-panel.bbgl-no-rates .c-gain .l-bot { min-height:0; }
+    .bbgl-seg { height:100%; box-sizing:border-box; position:relative; border:none; }
+    .bbgl-seg.seg-rounded-end { border-top-right-radius:10px; border-bottom-right-radius:10px; box-shadow:2px 0 3px rgba(0,0,0,0.5); z-index:5; }
+    .seg-brushed-green, .seg-brushed-gold { box-shadow:inset 0 0 2px rgba(0,0,0,0.5); border-top:1px solid rgba(255,255,255,0.1); }
+    .seg-brushed-green { background:repeating-linear-gradient(90deg,transparent 0,transparent 1px,rgba(0,0,0,0.15) 1px,rgba(0,0,0,0.15) 2px),linear-gradient(180deg,#203a10 0%,#355e1a 30%,#609438 60%,#355e1a 70%,#15290a 100%); }
+    .seg-brushed-gold { background:repeating-linear-gradient(90deg,transparent 0,transparent 1px,rgba(0,0,0,0.15) 1px,rgba(0,0,0,0.15) 2px),linear-gradient(180deg,#3e2b05 0%,#6b4c0a 30%,#aa8530 60%,#6b4c0a 70%,#2e1f02 100%); }
+    .seg-polished-green { background:linear-gradient(180deg,#0d2b05 0%,#3a7a13 35%,#aaff66 45%,#3a7a13 65%,#0d2b05 100%); }
+    .seg-polished-gold { background:linear-gradient(180deg,#3d2200 0%,#8f6205 35%,#fff7cc 45%,#fff7cc 55%,#8f6205 65%,#3d2200 100%); }
+    .bbgl-track-label { position:absolute; top:0; bottom:0; right:5px; display:flex; align-items:center; font-size:9px; font-weight:700; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,1); opacity:0; pointer-events:none; transition:opacity .2s; white-space:nowrap; z-index:60; }
+    .bbgl-weekly-track:hover .bbgl-track-label { opacity:1; }
+    #bbgl-settings-view, #bbgl-welcome-view { background:#222; color:#ddd; display:none; flex-direction:column; height:100%; position:relative; overflow:hidden!important; padding:0!important; }
+    #bbgl-settings-view.active-view, #bbgl-welcome-view.active-view { display:flex; }
+    .bbgl-author-block { margin:8px 10px 10px; padding:8px 10px; background:#2a2a2a; border:1px solid #3a3a3a; border-radius:4px; font-family:Arial,sans-serif; font-size:12px; color:#aaa; line-height:1.6; }
+    .bbgl-author-block strong { color:#ddd; display:block; margin-bottom:4px; font-size:13px; }
+    .bbgl-settings-scroll-area { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; width:100%; box-sizing:border-box; -ms-overflow-style:none; scrollbar-width:none; }
+    .ledger-content::-webkit-scrollbar, .calendar-wrapper::-webkit-scrollbar, .bbgl-settings-scroll-area::-webkit-scrollbar { display:none; }
+    .bbgl-mask-host { position:relative; }
+    .bbgl-mask-active::after { content:attr(data-mask-text); position:absolute; inset:0; background:rgba(0,0,0,0.65); color:#ddd; font-family:Arial,sans-serif; font-size:12px; font-weight:700; text-align:center; display:flex; align-items:center; justify-content:center; padding:0 20px; box-sizing:border-box; z-index:50; pointer-events:all; border-radius:0 0 5px 5px; }
+    .bbgl-init-locked #bbgl-settings-btn, .bbgl-init-locked #bbgl-page-settings { display:none!important; }
+    .bbgl-ack-check { display:inline-flex; width:14px; height:14px; color:#69f0ae; flex:0 0 auto; margin-top:2px; }
+    .bbgl-ack-check svg { width:100%; height:100%; }
+    .bbgl-modal-overlay { position:fixed; inset:0; z-index:9999999; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.7); backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px); padding:20px; box-sizing:border-box; overflow-y:auto; }
+    .bbgl-modal-window { background:#2a2a2a; border:1px solid #444; border-radius:5px; width:min(560px, 92vw); max-height:90vh; overflow-y:auto; overflow-x:hidden; position:relative; padding:8px; box-shadow:0 10px 30px rgba(0,0,0,0.6); box-sizing:border-box; -ms-overflow-style:none; scrollbar-width:none; }
+    .bbgl-modal-window::-webkit-scrollbar { display:none; }
+    .bbgl-modal-scrollbox { max-height:240px; overflow-y:auto; overflow-x:hidden; border:1px solid #1a1a1a; background:#2a2a2a; border-radius:4px; padding:8px 10px; margin:8px 10px; font-family:Arial,sans-serif; font-size:12px; color:#ccc; line-height:1.5; scrollbar-width:thin; scrollbar-color:#555 #2a2a2a; }
+    .bbgl-modal-scrollbox::-webkit-scrollbar { display:block; width:4px; }
+    .bbgl-modal-scrollbox::-webkit-scrollbar-thumb { background:#555; border-radius:4px; }
+    .bbgl-modal-scrollbox strong { color:#ddd; font-size:12px; font-weight:700; }
+    .bbgl-modal-scrollbox > strong { display:block; margin-top:6px; margin-bottom:2px; }
+    .bbgl-modal-scrollbox > strong:first-child { margin-top:0; }
+    .bbgl-modal-scrollbox p { margin:0 0 8px 0; }
+    .bbgl-modal-scrollbox p:last-child { margin-bottom:0; }
+    .bbgl-ack-row { display:flex; gap:8px; align-items:flex-start; padding:4px 0; color:#ccc; }
+    .bbgl-ack-row input[type="checkbox"] { margin-top:2px; flex:0 0 auto; cursor:pointer; }
+    .bbgl-ack-row label { cursor:pointer; flex:1; }
+    .torn-btn.bbgl-btn-disabled { filter:grayscale(1); opacity:.5; pointer-events:none; }
+    .bbgl-agree-wrap { flex:1; display:block; }
+    .bbgl-agree-wrap .torn-btn { width:100%; }
+    @keyframes bbgl-crt-out{ 0%{transform:scale(1);opacity:1;filter:brightness(1)} 40%{transform:scale(1,0.005);opacity:1;filter:brightness(3)} 100%{transform:scale(0,0);opacity:0;filter:brightness(0)} }
+    @keyframes bbgl-crt-in{ 0%{transform:scale(0,0);opacity:0;filter:brightness(0)} 60%{transform:scale(1,0.005);opacity:1;filter:brightness(3)} 100%{transform:scale(1);opacity:1;filter:brightness(1)} }
+    .bbgl-crt-out { animation:bbgl-crt-out .3s ease-in forwards; transform-origin:center; pointer-events:none; }
+    .bbgl-crt-in { animation:bbgl-crt-in .3s ease-out forwards; transform-origin:center; }
+    [data-tooltip] { cursor:default; }
+    .bbgl-link-btn { color:#999; font-size:11px; text-decoration:none; cursor:pointer; border-bottom:1px dotted rgba(153,153,153,0.4); transition:color .2s,border-color .2s; display:inline-block; line-height:1.4; }
+    .bbgl-link-btn:hover { color:#fff; border-bottom-color:#fff; }
+    .bbgl-day-cell.ghost-cell::after { content:""; display:block; }
+    .bbgl-day-cell.is-archived .day-num { text-shadow:0 1px 4px rgba(0,0,0,1),0 0 2px rgba(0,0,0,1); z-index:20; }
+    @media (max-width: 800px) {
+        .bbgl-paste-icon { display: none !important; }
+        .bbgl-native-input { padding-left: 10px !important; }
+    }
+    .mobile-mode .bbgl-paste-icon { display: none !important; }
+    .mobile-mode .bbgl-native-input { padding-left: 10px !important; }
+    @media (max-width: 620px) {
+        /* Kill sticky hover on arrows for touch contexts */
+        .sticker-nav-btn:hover { transform:translateY(-60%)!important; text-shadow:0 1px 3px #000!important; }
+        .arrow-btn:hover { transform:none!important; text-shadow:0 1px 3px #000!important; }
+        .sticker-nav-btn:active { transform:translateY(-50%) scale(1.3)!important; text-shadow:0 0 8px rgba(255,255,255,0.8)!important; }
+        .arrow-btn:active { transform:scale(1.3)!important; text-shadow:0 0 8px rgba(255,255,255,0.8)!important; }
+        /* Mobile standard: remove max-height cap so full 438.5px height is expressed */
+        #bbgl-panel:not(.bbgl-expanded) { max-height:none!important; }
+        /* Mobile expanded: full-width floating panel with desktop-style controls */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) { width:calc(100vw - 22px)!important; max-height:none!important; overflow:hidden!important; }
+
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page):not(.bbgl-tall) #bbgl-top-panel { flex:0 0 160px!important; margin-bottom:0!important; overflow:hidden!important; padding-top:2px!important; padding-bottom:12px!important; box-shadow:inset 0 0 40px rgba(0,0,0,0.95)!important; border-bottom:1px solid #111!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page):not(.bbgl-tall) #bbgl-top-panel.viewing-stickers { flex:0 0 190px!important; }
+        /* Ledger: auto height, centered content */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .ledger-content { height:auto!important; flex:none!important; overflow:visible!important; align-content:center!important; padding:4px 4px 12px 4px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-container { height:100%!important; flex:1!important; }
+        /* Mobile expanded non-tall: reduce font scale below desktop expanded values */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-tall):not(.bbgl-mode-page) { --bbgl-f-label:12px; --bbgl-f-top:12px; --bbgl-f-bot:10px; --bbgl-col-gap:11px; }
+        /* Tall mode: font scale is capped below desktop tall values to prevent clipping */
+        #bbgl-panel.bbgl-expanded.bbgl-tall:not(.bbgl-mode-page) { --bbgl-f-label:12.5px; --bbgl-f-top:12.5px; --bbgl-f-bot:10.5px; --bbgl-col-gap:12px; }
+        /* Tall mode top panel: cap height so ledger doesn't slide down too far */
+        #bbgl-panel.bbgl-expanded.bbgl-tall:not(.bbgl-mode-page) #bbgl-top-panel { flex:0 0 190px!important; margin-bottom:-30px!important; overflow:hidden!important; box-shadow:0 5px 15px rgba(0,0,0,0.5),inset 0 0 40px rgba(0,0,0,0.95)!important; border-bottom:1px solid #333!important; z-index:25!important; }
+        #bbgl-panel.bbgl-expanded.bbgl-tall:not(.bbgl-mode-page) #bbgl-top-panel.viewing-stickers { flex:0 0 190px!important; }
+        /* Tall mode ledger: small top nudge to clear the viewstate icon buttons */
+        #bbgl-panel.bbgl-expanded.bbgl-tall:not(.bbgl-mode-page) .ledger-content { padding-top:8px!important; }
+        /* Bottom panel: flex stretching to fill screen */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-bottom-panel { flex:1!important; overflow:hidden!important; }
+
+        /* Mobile expanded stickers: revert desktop expanded rules back to fit the 160px top panel, but keep sticker size larger */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-slot { height:79px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-img { height:103%!important; max-width:112%!important; object-fit:contain!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-slot.locked .sticker-img { height:99%!important; width:100%!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .viewer-obj { transform:rotateX(5deg) scale(0.95) translateY(5px)!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .viewer-info-overlay { top:40px!important; left:15px!important; bottom:auto!important; right:auto!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .vi-name { font-size:14px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-title { font-size:12px!important; top:7px!important; right:15px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-nav-btn { font-size:24px!important; width:25px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #sticker-prev-btn { left:0!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #sticker-next-btn { right:0!important; }
+
+        /* Header image: full width, fixed height, no desktop side padding */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-header-wrapper { flex:0 0 120px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-header-wrapper::before { left:4px!important; right:4px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-month-header { padding-left:4px!important; padding-right:8px!important; margin-bottom:2px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .all-time-btn { width:24px!important; height:24px!important; }
+        /* Grid: full width grid container, flex layout for scrollable calendar */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-grid-container { flex:1!important; overflow:hidden!important; padding:0 2px!important; height:auto!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .calendar-wrapper { overflow-y:auto!important; overflow-x:hidden!important; height:auto!important; flex:1!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-cal-container { height:auto!important; display:flex!important; flex-direction:column!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-row-slice { flex:none!important; width:100%!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-day-cell { aspect-ratio:1/1!important; flex:1!important; height:auto!important; }
+        /* Graph container: translateZ forces GPU layer above ::after */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container { transform:translateZ(0); }
+        /* Graph pills: larger + more breathing room on all mobile views */
+        #bbgl-graph-container .g-pill { font-size:9.5px!important; padding:1px 5px!important; }
+        #bbgl-graph-container .g-toggles { gap:4px!important; }
+        #bbgl-graph-container .g-hud { margin-bottom:5px!important; }
+        /* Mobile standard: scale pills down to fit compact window */
+        #bbgl-panel:not(.bbgl-expanded):not(.bbgl-mode-page) #bbgl-graph-container .g-pill { font-size:9px!important; padding:1px 5px!important; }
+        #bbgl-panel:not(.bbgl-expanded):not(.bbgl-mode-page) #bbgl-graph-container .g-toggles { gap:3px!important; }
+        #bbgl-panel:not(.bbgl-expanded):not(.bbgl-mode-page) #bbgl-graph-container .g-hud { margin-bottom:4px!important; }
+        /* Graph text consolidation */
+        #bbgl-graph-container .g-text { font-size: 9px!important; }
+        #bbgl-graph-container .g-text.x-label { font-size: 9px!important; }
+
+        /* Viewstate button sizes and positions are set globally in base CSS */
+        #bbgl-panel:is(.bbgl-expanded, .bbgl-mode-page) .stats-btn { width:28px!important; height:28px!important; }
+        #bbgl-panel.bbgl-expanded #bbgl-ledger-toggle,
+        #bbgl-panel.bbgl-expanded #bbgl-achievements-toggle { width:15.5px!important; height:15.5px!important; }
+        #bbgl-panel.bbgl-expanded #bbgl-graph-toggle,
+        #bbgl-panel.bbgl-expanded #bbgl-sticker-toggle,
+        #bbgl-panel.bbgl-expanded #bbgl-copy-btn { width:16px!important; height:16px!important; }
+        #bbgl-panel.bbgl-mode-page #bbgl-ledger-toggle,
+        #bbgl-panel.bbgl-mode-page #bbgl-graph-toggle,
+        #bbgl-panel.bbgl-mode-page #bbgl-achievements-toggle,
+        #bbgl-panel.bbgl-mode-page #bbgl-sticker-toggle,
+        #bbgl-panel.bbgl-mode-page #bbgl-copy-btn { width:19px!important; height:19px!important; }
+    }
+    @media (min-width: 621px) {
+        /* Desktop expanded: header image and calendar grid fill full panel width */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-header-wrapper { flex:0 0 145px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-header-wrapper::before { left:0!important; right:0!important; top:0!important; border-radius:5px 5px 0 0!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-grid-container { padding:0!important; }
+        /* Buttons shift proportionally to match the image expansion (50px gained each side) */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-month-header { padding-left:8px!important; padding-right:16px!important; }
+        /* Day numbers: larger default; active state still grows */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .day-num { font-size:16px!important; top: 6px!important; left:6px!important }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-day-cell.is-viewing .day-num { font-size:22px!important; width:36px!important; height:36px!important; }
+        /* View toggle + copy button size bumps */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle svg,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle svg { width:15.5px!important; height:15.5px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-toggle,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-toggle svg,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle svg,
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn svg { width:16px!important; height:16px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle { left:32px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-toggle { left:62px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle { left:93px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle { left:122px!important; }
+        /* Header element size bumps */
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .arrow-btn { font-size:21px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .all-time-btn { width:33px!important; height:33px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #year-trigger { font-size:16px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #month-trigger { font-size:23px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .ui-floating-label, #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .ui-floating-summary { font-size:14px!important; }
+        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .stats-btn { width:28px!important; height:28px!important; }
+    }
+    .bbgl-coming-soon { position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:rgba(255,255,255,0.7); font-size:24px; font-weight:bold; letter-spacing:2px; z-index:10; pointer-events:none; text-shadow:0 0 10px rgba(255,255,255,0.2); text-align:center; line-height:1.2; }
+    `;
+    function injectStyles() { const style = document.createElement('style'); style.textContent = CSS_STYLES; document.head.appendChild(style); }
+    function injectApiCounter() { if (document.getElementById('bbgl-api-hud')) return; const hud = document.createElement('div'); hud.id = 'bbgl-api-hud'; hud.innerHTML = `API Calls: ${runtime.apiCallTotal}`; hud.style.display = 'none'; document.body.appendChild(hud); dom.apiHud = hud; }
+    function syncDevModeUI() {
+        const mode = runtime.devMode;
+        if (mode) { injectApiCounter(); if (dom.apiHud) dom.apiHud.style.display = 'block'; }
+        else { if (dom.apiHud) dom.apiHud.style.display = 'none'; }
+        const btn = document.getElementById('dev-reset-btn');
+        if (btn) btn.style.display = mode ? 'block' : 'none';
+    }
+
+
+    function cacheDOM(root) {
+        if (!root) return;
+        dom.panel = root.id === 'bbgl-panel' ? root : root.querySelector('#bbgl-panel') || root;
+        if (!userConfig.animations) dom.panel.classList.add('bbgl-no-animations');
+        if (!userConfig.ratesEnabled) dom.panel.classList.add('bbgl-no-rates');
+        dom.topPanel = root.querySelector('#bbgl-top-panel');
+        dom.bottomPanel = root.querySelector('#bbgl-bottom-panel');
+        dom.settingsView = root.querySelector('#bbgl-settings-view');
+        dom.welcomeView = root.querySelector('#bbgl-welcome-view');
+        dom.itemViewer = root.querySelector('#bbgl-item-viewer');
+        dom.dateLabel = root.querySelector('#bbgl-date-label');
+        dom.summaryLabel = root.querySelector('#bbgl-summary-label');
+        dom.ledgerView = root.querySelector('#bbgl-ledger-view');
+        dom.graphContainer = root.querySelector('#bbgl-graph-container');
+        dom.graphSvg = root.querySelector('#bbgl-graph-svg');
+        dom.calContainer = root.querySelector('#bbgl-cal-container');
+        dom.tallToggle = root.querySelector('#bbgl-tall-toggle');
+        dom.copyBtn = root.querySelector('#bbgl-copy-btn');
+        dom.popBtn = root.querySelector('#bbgl-pop-btn');
+        dom.monthTrigger = root.querySelector('#month-trigger');
+        dom.yearTrigger = root.querySelector('#year-trigger');
+        dom.monthDropdown = root.querySelector('#bbgl-month-dropdown');
+        dom.yearDropdown = root.querySelector('#bbgl-year-dropdown');
+        dom.achievementsContainer = root.querySelector('#bbgl-achievements-container');
+        dom.achievementsToggle = root.querySelector('#bbgl-achievements-toggle');
+        dom.stickerGrid = root.querySelector('#bbgl-sticker-grid');
+        dom.stickerPagination = root.querySelector('#bbgl-sticker-pagination');
+        dom.stickerTitle = root.querySelector('#bbgl-sticker-title');
+        dom.stickerPrev = root.querySelector('#sticker-prev-btn');
+        dom.stickerNext = root.querySelector('#sticker-next-btn');
+        dom.stickerContainer = root.querySelector('#bbgl-sticker-container');
+        dom.stickerBg = root.querySelector('#bbgl-sticker-bg');
+        dom.viPedestal = root.querySelector('#vi-pedestal-wrapper');
+        dom.viObj = root.querySelector('#vi-obj-target');
+        dom.viName = root.querySelector('#vi-name-target');
+        dom.refreshBtn = root.querySelector('#refresh-log-btn');
+        dom.contentWrapper = root.querySelector('#bbgl-content-wrapper');
+        // Elements outside the panel are cached where they're created
+        if (!dom.apiHud) dom.apiHud = document.getElementById('bbgl-api-hud');
+        if (!dom.gymTab) dom.gymTab = document.getElementById('bbgl-gym-tab');
+    }
+
+    /**
+     *  [SECTION III] THE SUPPLEMENTS (Utility Belt)
+     *  ========================================================================
+     *  Performance enhancers. Pure, distilled efficiency to make the heavy
+     *  lifting easier.
+     */
+
+    const Formatter = {
+        number(n, d = 0) { return (n === undefined || n === null) ? '0' : n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); },
+        abbr(n, d = 1) { if (!n && n !== 0) return '0'; const abs = Math.abs(n); if (abs < 1000) return Math.floor(n).toString(); const tiers = [[1e15, 'q'], [1e12, 't'], [1e9, 'b'], [1e6, 'm'], [1e3, 'k']]; for (const [mag, suffix] of tiers) { if (abs >= mag) return (n / mag).toFixed(d) + suffix; } return Math.floor(n).toString(); },
+        rate(n, exp = false) { if (!n && n !== 0) return '0'; if (n < 1000) return this.number(n, exp ? 2 : 1); if (exp) return this.number(Math.floor(n), 0); return this.abbr(n, 1); },
+        dual(val, r = false) { let std, exp; if (r) { std = this.rate(val, false); exp = this.rate(val, true); } else { std = Math.abs(val) > 9999 ? this.abbr(val) : this.number(val); exp = (Math.abs(val) >= 1e9) ? this.abbr(val, 4) : this.number(val); } return `<span class="view-std">${std}</span><span class="view-exp">${exp}</span>`; },
+        axis(n) { if (n === 0) return '0'; const abs = Math.abs(n); let div = 1, s = ''; if (abs >= 1e12) { div = 1e12; s = 't'; } else if (abs >= 1e9) { div = 1e9; s = 'b'; } else if (abs >= 1e6) { div = 1e6; s = 'm'; } else if (abs >= 1e3) { div = 1e3; s = 'k'; } return Math.round(n / div) + s; },
+        parse(s) { if (!s) return new Date(); return new Date(s.includes('T') ? s : s + 'T00:00:00Z'); },
+        dateISO(y, m, d) { return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; },
+        dateLogical(ts = null) { const d = ts ? new Date(ts) : new Date(); return this.dateISO(TimeManager.year(d), TimeManager.month(d), TimeManager.date(d)); },
+        datePretty(s) { if (!s || s.includes('Summary')) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`; },
+        dateMonthDay(s) { if (!s) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`; },
+        dateFull(s) { if (!s || s.includes('Summary')) return s; const p = s.split('-'); if (p.length !== 3) return s; const d = this.parse(s); return `${CONSTANTS.MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`; }
+    };
+
+    const TooltipController = {
+        el: null, arrow: null, currentTarget: null,
+        init() { if (this.el) return; this.el = document.createElement('div'); this.el.id = 'bbgl-tooltip'; this.arrow = document.createElement('div'); this.arrow.id = 'bbgl-tooltip-arrow'; this.el.appendChild(this.arrow); document.body.appendChild(this.el); },
+        hide() { if (this.el) { this.el.style.display = 'none'; this.currentTarget = null; } },
+        show(html, rect) {
+            if (!this.el) this.init(); this.el.innerHTML = html; this.el.appendChild(this.arrow); this.el.style.display = 'block'; this.el.className = '';
+            const ttRect = this.el.getBoundingClientRect(), pad = 12, view = { w: window.innerWidth, h: window.innerHeight };
+            let side = 'top'; const fitsTop = (rect.top - ttRect.height - pad >= 0), fitsBot = (rect.bottom + ttRect.height + pad <= view.h);
+            if (fitsTop) side = 'top'; else if (fitsBot) side = 'bottom'; else side = 'left';
+            let x = 0, y = 0;
+            if (side === 'top') { x = rect.left + (rect.width / 2) - (ttRect.width / 2); y = rect.top - ttRect.height - pad; } else if (side === 'bottom') { x = rect.left + (rect.width / 2) - (ttRect.width / 2); y = rect.bottom + pad; } else { x = rect.left - ttRect.width - pad; y = rect.top + (rect.height / 2) - (ttRect.height / 2); }
+            if (x < 5) x = 5; if (x + ttRect.width > view.w - 5) x = view.w - ttRect.width - 5; if (y < 5) y = 5; if (y + ttRect.height > view.h - 5) y = view.h - ttRect.height - 5;
+            this.el.style.left = x + 'px'; this.el.style.top = y + 'px'; this.el.classList.add('pos-' + side);
+            this.arrow.style.marginLeft = ''; this.arrow.style.marginTop = '';
+        },
+        resolve(target) { return target.closest('[data-tooltip], [data-tooltip-html]'); },
+        handleHover(e) {
+            const t = this.resolve(e.target);
+            if (!t) { if (this.currentTarget) this.hide(); return; }
+            if (this.currentTarget === t) return; this.currentTarget = t;
+            const h = t.getAttribute('data-tooltip-html'), txt = t.getAttribute('data-tooltip');
+            if (h) this.show(h, t.getBoundingClientRect()); else if (txt) this.show('<div style="text-align:center; color:#ddd;">' + txt + '</div>', t.getBoundingClientRect()); else this.hide();
+        }
+    };
+
+    function resetRefreshBtn(btn) { if (!btn) return; if (btn.dataset.timerId) { clearTimeout(btn.dataset.timerId); delete btn.dataset.timerId; } btn.style.color = ""; btn.style.opacity = "1"; if (btn.dataset.originalText) { btn.innerText = btn.dataset.originalText; delete btn.dataset.originalText; } }
+    function checkRefreshCooldown(btn) {
+        const now = Date.now();
+        // Prune clicks older than 60 seconds
+        while (_refreshClickLog.length > 0 && now - _refreshClickLog[0] > 60000) _refreshClickLog.shift();
+        _refreshClickLog.push(now);
+        if (_refreshClickLog.length <= 4) return false;
+        // Apply cooldown
+        btn.disabled = true;
+        btn.style.opacity = '0.45';
+        btn.style.color = '#666';
+        if (!btn.dataset.originalText) btn.dataset.originalText = btn.innerText;
+        let remaining = Math.ceil((60000 - (now - _refreshClickLog[0])) / 1000);
+        const updateTooltip = () => { btn.setAttribute('data-tooltip', TOOLTIPS.REFRESH_COOLDOWN(remaining)); };
+        updateTooltip();
+        const interval = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(interval);
+                btn.disabled = false;
+                btn.style.opacity = '';
+                btn.style.color = '';
+                btn.removeAttribute('data-tooltip');
+                if (btn.dataset.originalText) { btn.innerText = btn.dataset.originalText; delete btn.dataset.originalText; }
+                _refreshClickLog.length = 0;
+            } else {
+                updateTooltip();
+            }
+        }, 1000);
+        return true;
+    }
+    function incrementApiCount(n) { runtime.apiCallTotal += n; const hud = dom.apiHud; if (hud) hud.innerHTML = `API Calls: ${runtime.apiCallTotal}`; }
+    function saveViewState() { if (runtime.isSyncing) return; localStorage.setItem(KEYS.STATE, JSON.stringify(viewState)); }
+    function saveConfig() {
+        const c = {}; ALLOWED_CONFIG_KEYS.forEach(k => { if (userConfig[k] !== undefined) c[k] = userConfig[k]; });
+        localStorage.setItem(KEYS.CONFIG, JSON.stringify(c));
+    }
+    // Returns the current dual-state string for a sticker id from the in-memory cache.
+    // Format: first char = unlocked (+/-), second char = post-it cleared (+/-).
+    // Defaults to "--" (locked, uncleared) if no record exists yet.
+    function getStickerState(id) { const states = (_historyCache && _historyCache.meta && _historyCache.meta.stickers) ? _historyCache.meta.stickers : {}; return states[String(id)] || '--'; }
+    // Marks a sticker's post-it as permanently cleared (second char -> '+').
+    // Fires an async DB write and updates the in-memory cache. The cleared state is
+    // irreversible by design — once '+', it never goes back regardless of unlock status.
+    async function persistStickerCleared(id) {
+        try {
+            const stored = await DBManager.getStorage();
+            if (!stored) return;
+            if (!stored.meta) stored.meta = {};
+            if (!stored.meta.stickers) stored.meta.stickers = {};
+            const key = String(id);
+            // Read unlock state from the in-memory cache (authoritative) not the DB.
+            // The DB's stickers object lags behind since getStickerMap() only writes to
+            // _historyCache. Reading the DB here would default to '--' and produce '-+'
+            // instead of the correct '++' for an unlocked-then-cleared sticker.
+            const cachedState = (_historyCache && _historyCache.meta && _historyCache.meta.stickers && _historyCache.meta.stickers[key]) || '--';
+            const newState = cachedState[0] + '+';
+            stored.meta.stickers[key] = newState;
+            await DBManager.setStorage(stored);
+            // Keep in-memory cache in sync
+            if (_historyCache) { if (!_historyCache.meta) _historyCache.meta = {}; if (!_historyCache.meta.stickers) _historyCache.meta.stickers = {}; _historyCache.meta.stickers[key] = newState; }
+        } catch (e) { console.warn('BBGL: Failed to persist sticker cleared state', e); }
+    }
+    function getISOWeek(s) { const d = Formatter.parse(s), date = new Date(d.valueOf()); date.setUTCDate(date.getUTCDate() + 3 - (date.getUTCDay() + 6) % 7); const w1 = new Date(Date.UTC(date.getUTCFullYear(), 0, 4)); return 1 + Math.round(((date.getTime() - w1.getTime()) / 86400000 - 3 + (w1.getUTCDay() + 6) % 7) / 7); }
+    function computeWeekCompletion(days) { let tot = 0, numGold = 0, numGreen = 0; days.forEach(d => { const e = d.eSpent ? d.eSpent.total : 0; if (e >= 1500) { tot += 1500; numGold++; } else if (e >= 1000) { tot += 1000; numGreen++; } }); const isGold = numGold >= 3 && numGreen >= 3; return { isCompleted: isGold || tot >= GAME.WEEKLY_GOAL, isGold }; }
+    function getWeekKey(dateStr) { const d = Formatter.parse(dateStr); const dayIdx = d.getUTCDay(); const offset = userConfig.weekStartMode === 'mon' ? (dayIdx === 0 ? 6 : dayIdx - 1) : dayIdx; const weekStart = new Date(d.getTime() - offset * 86400000); return Formatter.dateISO(weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate()); }
+
+    /**
+     *  [SECTION VI] THE EXERCISE (Data Layer)
+     *  ========================================================================
+     *  The grind. Turning raw inputs into cold, hard data. We don't just store
+     *  history; we forge it.
+     */
+
+    const STAT_KEYS = ['str', 'def', 'spd', 'dex'];
+
+    function sumStats(o) { return (o.str || 0) + (o.def || 0) + (o.spd || 0) + (o.dex || 0); }
+
+    const DataController = {
+        _cache: { timeline: null, slices: {}, dateMap: null, rateArr: null, stickerMap: null, unlockedCount: null, featuredDays: null },
+        invalidate() { this._cache.timeline = null; this._cache.slices = {}; this._cache.dateMap = null; this._cache.rateArr = null; this._cache.stickerMap = null; this._cache.unlockedCount = null; this._cache.featuredDays = null; runtime.stickerData = []; },
+        // Returns true if the post-it for this sticker id has been permanently cleared.
+        // In demo mode, sticker 1 is always treated as cleared to keep the UI clean.
+        isStickerCleared(id) {
+            if (runtime.demoMode) return id === 1;
+            return getStickerState(id)[1] === '+';
+        },
+        markStickerCleared(id) {
+            if (runtime.demoMode) return; // Demo mode: no DB writes
+            persistStickerCleared(id);
+        },
+        getStickerMap() {
+            if (this._cache.stickerMap) return this._cache.stickerMap;
+            const today = Formatter.dateLogical();
+            const todayWeekKey = getWeekKey(today);
+            // Group all archived timeline days by ISO week
+            const weekMap = {};
+            this.getTimeline().forEach(day => {
+                if (day.date >= today) return;
+                const wk = getWeekKey(day.date);
+                if (!weekMap[wk]) weekMap[wk] = [];
+                weekMap[wk].push(day);
+            });
+            const stickerMap = new Map();
+            const featuredSet = new Set();
+            let unlockedCount = 1;
+            let rouletteCounter = 0;
+            Object.keys(weekMap).sort().forEach(wk => {
+                if (wk > todayWeekKey) return; // skip future weeks
+                const days = weekMap[wk].sort((a, b) => a.date.localeCompare(b.date));
+                const stickerworthyDays = days.filter(d => d.eSpent && d.eSpent.total >= 1000);
+                if (!stickerworthyDays.length) return;
+                // For the current week, today's training may be what tips the bar into
+                // completion — include it in the completion check to match the weekly bar,
+                // even though today itself won't get a sticker until it becomes archived.
+                let completionDays = days;
+                if (wk === todayWeekKey) {
+                    const todayEntry = this.getTimeline().find(d => d.date === today);
+                    if (todayEntry) completionDays = [...days, todayEntry];
+                }
+                const { isCompleted, isGold } = computeWeekCompletion(completionDays);
+                const numFeatured = isGold ? 2 : (isCompleted ? 1 : 0);
+                const splitIdx = Math.max(0, stickerworthyDays.length - numFeatured);
+                const rouletteDays = stickerworthyDays.slice(0, splitIdx);
+                const featuredDays = stickerworthyDays.slice(splitIdx);
+                const rouletteStep = (unlockedCount <= 20 && unlockedCount !== 11) ? 11 : 9;
+                rouletteDays.forEach(day => {
+                    const rawIdx = (rouletteCounter * rouletteStep) % unlockedCount;
+                    const idx = runtime.demoMode ? 0 : rawIdx;
+                    stickerMap.set(day.date, CUSTOM_STICKERS[idx]);
+                    rouletteCounter++;
+                });
+                featuredDays.forEach((day, i) => {
+                    const newIdx = unlockedCount + i;
+                    if (newIdx < CUSTOM_STICKERS.length) {
+                        const idx = runtime.demoMode ? 0 : newIdx;
+                        stickerMap.set(day.date, CUSTOM_STICKERS[idx]);
+                        featuredSet.add(day.date);
+                    } else {
+                        const rawIdx = (rouletteCounter * rouletteStep) % unlockedCount;
+                        const idx = runtime.demoMode ? 0 : rawIdx;
+                        stickerMap.set(day.date, CUSTOM_STICKERS[idx]);
+                        rouletteCounter++;
+                    }
+                });
+                unlockedCount = Math.min(unlockedCount + numFeatured, CUSTOM_STICKERS.length);
+            });
+            if (runtime.demoMode) unlockedCount = 1;
+            this._cache.stickerMap = stickerMap;
+            this._cache.featuredDays = featuredSet;
+            this._cache.unlockedCount = unlockedCount;
+            // Build the full sticker state snapshot for every known sticker and sync it into
+            // the in-memory cache. Format per entry: [unlocked char][cleared char] (+/-).
+            // We read existing cleared states first so any previously ripped post-its
+            // (from this session or from an imported file) are preserved.
+            if (!runtime.demoMode) {
+                const existingStates = (_historyCache && _historyCache.meta && _historyCache.meta.stickers) ? _historyCache.meta.stickers : {};
+                const freshStates = {};
+                for (let i = 1; i <= CUSTOM_STICKERS.length; i++) {
+                    const key = String(i);
+                    const wasClear = (existingStates[key] || '--')[1] === '+';
+                    freshStates[key] = (i <= unlockedCount ? '+' : '-') + (wasClear ? '+' : '-');
+                }
+                if (_historyCache) { if (!_historyCache.meta) _historyCache.meta = {}; _historyCache.meta.stickers = freshStates; }
+            }
+            return stickerMap;
+        },
+        getTimeline() {
+            if (this._cache.timeline) return this._cache.timeline;
+            const s = getActiveHistory(); let t = [...(s.history || [])];
+            if (s.today && (s.today.date || s.today.startTotal > 0)) { t = t.filter(d => d.date !== s.today.date); t.push(s.today); }
+            t.sort((a, b) => a.date.localeCompare(b.date));
+            if (s.meta && s.meta.logStartDate) { const anchorMs = (s.meta.logStartDate + 86400) * 1000; const anchorDate = new Date(anchorMs); const floor = Formatter.dateISO(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth(), anchorDate.getUTCDate()); t = t.filter(d => d.date >= floor); }
+            this._cache.timeline = t; return t;
+        },
+        getDateMap() {
+            if (this._cache.dateMap) return this._cache.dateMap;
+            const t = this.getTimeline(), m = {}; t.forEach(d => { m[d.date] = d; }); this._cache.dateMap = m; return m;
+        },
+        _buildRateCache() {
+            const h = getActiveHistory();
+            // Process ALL history days sorted chronologically, including the pre-anchor
+            // buffer day that getTimeline() filters out. Use per-log series entries when
+            // available (most granular); fall back to daily eSpent/gains for synthetic days.
+            const allDays = [...(h.history || [])].sort((a, b) => a.date.localeCompare(b.date));
+            const running = { str: null, def: null, spd: null, dex: null };
+            const arr = [];
+            allDays.forEach(day => {
+                if (day.series && day.series.length > 0) {
+                    day.series.forEach(e => { if (e.cost > 0) running[e.stat] = e.rate !== undefined ? e.rate : (e.gain / e.cost) * 150; });
+                } else {
+                    STAT_KEYS.forEach(k => { const cost = (day.eSpent && day.eSpent[k]) || 0; const gain = day.gains ? (day.gains[k] || 0) : 0; if (cost > 0) running[k] = (gain / cost) * 150; });
+                }
+                arr.push({ date: day.date, rates: { ...running } });
+            });
+            this._cache.rateArr = arr;
+            this._cache.originRates = (h.meta && h.meta.originRates) || {};
+        },
+        // Returns the last computed rate for a stat on or before a given date.
+        // Returns originRates fallback if no prior log exists for that stat.
+        getHistoricalRate(dateStr, stat) {
+            if (!this._cache.rateArr) this._buildRateCache();
+            const arr = this._cache.rateArr, or = this._cache.originRates;
+            let lo = 0, hi = arr.length - 1, best = -1;
+            while (lo <= hi) { const mid = (lo + hi) >> 1; if (arr[mid].date <= dateStr) { best = mid; lo = mid + 1; } else hi = mid - 1; }
+            if (best === -1) return (or[stat] || 0);
+            const rate = arr[best].rates[stat];
+            return rate !== null ? rate : (or[stat] || 0);
+        },
+        getSlice(mode, target, year = null) {
+            let k = `${mode}_${target}`;
+            if (mode === 'CUSTOM') k = `CUSTOM_${target.map(d => d.date).join('_')}`;
+            if (mode === 'MONTH') k = `MONTH_${year}_${target}`; // year-qualified so cache never serves wrong year
+            if (this._cache.slices[k]) return this._cache.slices[k];
+
+            let raw = null, res = mode, list = [];
+            if (mode === 'DAY') raw = this.getDateMap()[target];
+            else if (mode === 'MONTH') { const idx = CONSTANTS.MONTHS.indexOf(target); if (idx > -1) { const p = `${year}-${String(idx + 1).padStart(2, '0')}`; list = this.getTimeline().filter(d => d.date.startsWith(p)); } }
+            else if (mode === 'YEAR') list = this.getTimeline().filter(d => d.date.startsWith(target));
+            else if (mode === 'ALL') { list = this.getTimeline(); res = 'ALL'; } // All Time Logic
+            else if (mode === 'CUSTOM') { list = target; res = 'WEEK'; } // Legacy/Weekly Logic
+
+            const sl = this._hydrate(raw, list, target, res); this._cache.slices[k] = sl; return sl;
+        },
+        _hydrate(sDay, dList, lbl, res) {
+            const r = { label: lbl, resolution: res, date: (sDay ? sDay.date : (dList[0] ? dList[0].date : lbl)), stats: {}, meta: { tier: 0, isGap: false, totalEnergy: 0 }, _dailyList: dList || [] };
+            const ge = (d, k) => (!d || !d.eSpent) ? 0 : (d.eSpent[k] || 0);
+            const gg = (d, k) => d && d.gains ? (d.gains[k] || 0) : 0;
+            const gend = (d, k) => d && (d.endBreakdown || d.end) ? (d.endBreakdown || d.end)[k] || 0 : 0;
+            const gst = (d, k) => d && (d.startBreakdown || d.start) ? (d.startBreakdown || d.start)[k] || 0 : 0;
+            const keys = [...STAT_KEYS, 'total'];
+            if (sDay) {
+                keys.forEach(k => {
+                    const e = ge(sDay, k), g = gg(sDay, k); let s = gst(sDay, k), end = gend(sDay, k);
+                    if (k === 'total') { if (!s) s = STAT_KEYS.reduce((a, x) => a + gst(sDay, x), 0); if (!end) end = STAT_KEYS.reduce((a, x) => a + gend(sDay, x), 0); }
+                    r.stats[k] = { start: s, gain: g, end: end, cost: e, rate: e > 0 ? r2((g / e) * 150) : (k !== 'total' ? this.getHistoricalRate(sDay.date, k) : 0) };
+                }); r.meta.totalEnergy = r.stats.total.cost;
+            } else if (dList.length > 0) {
+                const srt = [...dList].sort((a, b) => a.date.localeCompare(b.date)), f = srt[0], l = srt[srt.length - 1];
+                keys.forEach(k => {
+                    let tc = 0, tg = 0; srt.forEach(d => { tc += ge(d, k); tg += gg(d, k); });
+                    let s = gst(f, k), end = gend(l, k);
+                    if (k === 'total') { if (!s) s = STAT_KEYS.reduce((a, x) => a + gst(f, x), 0); if (!end) end = STAT_KEYS.reduce((a, x) => a + gend(l, x), 0); }
+                    r.stats[k] = { start: s, gain: tg, end: end, cost: tc, rate: tc > 0 ? r2((tg / tc) * 150) : 0 };
+                }); r.meta.totalEnergy = r.stats.total.cost;
+            } else {
+                r.meta.isGap = true;
+                const pastEnd = { ...([...this.getTimeline()].reverse().find(d => d.date < r.date)?.endBreakdown || getActiveHistory().meta.baselineBreakdown || {}) };
+                pastEnd.total = STAT_KEYS.reduce((a, x) => a + (pastEnd[x] || 0), 0);
+                keys.forEach(k => { r.stats[k] = { start: pastEnd[k] || 0, gain: 0, end: pastEnd[k] || 0, cost: 0, rate: k !== 'total' ? this.getHistoricalRate(r.date, k) : 0 }; });
+            }
+            const e = r.meta.totalEnergy; if (e >= 1500) r.meta.tier = 2; else if (e >= 1000) r.meta.tier = 1; else r.meta.tier = 0;
+            return r;
+        },
+        async processDataPayload(apiLogs, apiBattlestats) {
+            let s = getActiveHistory();
+            const fullApiLogs = normalizeApiLogs(apiLogs);
+            let cleanLogs = fullApiLogs;
+
+            // BACKWARDS COMPATIBILITY GUARD: Protects existing long-term data from being wiped by Genesis
+            if (!s.meta.logStartDate) {
+                if (s.history.length > 0 || (s.today && s.today.lastLogTimestamp > 0)) {
+                    const oldestTs = s.history.length > 0 ? Formatter.parse(s.history[0].date).getTime() / 1000 : s.today.lastLogTimestamp;
+                    s.meta.logStartDate = oldestTs;
+                }
+            }
+
+            // GLOBAL GENESIS FLOOR: Once logStartDate is established, strip any pre-genesis
+            // logs from cleanLogs right here. Every downstream function (reconciliation,
+            // runDailyGrind, runGenesis) then operates on a guaranteed-safe dataset.
+            // runGenesis is safe because it applies its own horizon check on top of this.
+            if (s.meta.logStartDate) {
+                cleanLogs = cleanLogs.filter(l => l.ts >= s.meta.logStartDate);
+            }
+
+            // SOURCE OF TRUTH RECONCILIATION
+            // The API log is authoritative for any timestamp window it covers. When we
+            // have an established history and real log data, we replace our local series
+            // entries within the API's window entirely with the API's data. This corrects
+            // any duplication that the stacking bug may have introduced, and ensures the
+            // local record matches reality as far back as the API can see.
+            //
+            // IMPORTANT: The Torn API returns up to 100 entries per stat, which can reach
+            // back further than the genesis 7-day cutoff. We clamp reconciliation to
+            // logStartDate so we never introduce or overwrite data from before the
+            // intentional genesis start point.
+            if (s.meta.logStartDate && cleanLogs.length > 0) {
+                try {
+                    const stored = await DBManager.getStorage();
+                    if (stored) {
+                        if (stored.series) {
+                            // cleanLogs is already clamped to >= logStartDate by the genesis floor above.
+                            // The redundant filter is removed; reconcile the full filtered window.
+                            if (cleanLogs.length > 0) {
+                                const minApiTs = cleanLogs[0].ts;
+                                const maxApiTs = cleanLogs[cleanLogs.length - 1].ts;
+                                // Keep everything outside the reconcile window; replace inside with API data
+                                const outside = stored.series.filter(e => e.ts < minApiTs || e.ts > maxApiTs);
+                                const apiEntries = cleanLogs.map(l => ({ ts: l.ts, stat: l.stat, gain: r2(l.gain), cost: l.cost, after: r2(l.after), rate: l.cost > 0 ? r2((l.gain / l.cost) * 150) : 0 }));
+                                stored.series = [...outside, ...apiEntries].sort((a, b) => a.ts - b.ts);
+                            }
+                        }
+                        // Persist meta so logStartDate is always saved even when series
+                        // hasn't been migrated yet.
+                        // Preserve sticker states when merging meta — they must never be
+                        // clobbered by a reconciliation pass, as cleared states are permanent.
+                        // We prefer the current in-memory stickers (s.meta.stickers) if the
+                        // stored record is empty or missing them.
+                        stored.meta = { ...stored.meta, logStartDate: s.meta.logStartDate, originRates: s.meta.originRates, stickers: stored.meta.stickers || s.meta.stickers || {} };
+                        await DBManager.setStorage(stored);
+                        // Rebuild in-memory state directly from the reconciled data
+                        const rebuilt = DataController._rebuildFromSeries(stored.series || [], stored.meta.baselineBreakdown || ZERO_BREAKDOWN);
+                        _historyCache = { meta: stored.meta, history: rebuilt.history, today: rebuilt.today };
+                        sessionStorage.setItem(KEYS.SESSION_CACHE, JSON.stringify(_historyCache));
+                    }
+                } catch (e) { console.warn('BBGL: Reconciliation error', e); }
+                s = getActiveHistory();
+            }
+
+            // Route to the correct processor
+            if (!s.meta.logStartDate) this._runGenesis(cleanLogs, apiBattlestats, s);
+            else this._runDailyGrind(cleanLogs, apiBattlestats, s);
+
+            // Ensure "Today" is actually today (handles day-rollovers when no logs are present)
+            const logicalToday = Formatter.dateLogical();
+            if (s.today.date !== logicalToday) {
+                if (s.today.startTotal > 0 || s.today.gains.total > 0) s.history.push(s.today);
+                s.today = initializeDayObject(logicalToday, s.today.endBreakdown);
+            }
+
+            // ORIGIN RATES MIGRATION: Fill any missing/zero originRates using the full
+            // pre-filter API window (100 entries per stat). Runs on every sync but only
+            // updates stats that are still 0. For each such stat, finds the most recent
+            // entry before the genesis anchor date; falls back to the oldest available
+            // entry in the API window if nothing pre-dates the anchor.
+            if (s.meta.logStartDate) {
+                if (!s.meta.originRates) s.meta.originRates = { ...ZERO_BREAKDOWN };
+                const _anchorStr = Formatter.dateLogical((s.meta.logStartDate + 86400) * 1000);
+                STAT_KEYS.forEach(k => {
+                    if (!s.meta.originRates[k]) {
+                        for (let i = fullApiLogs.length - 1; i >= 0; i--) {
+                            const l = fullApiLogs[i];
+                            if (l.stat === k && l.cost > 0 && Formatter.dateLogical(l.ts * 1000) < _anchorStr) {
+                                s.meta.originRates[k] = (l.gain / l.cost) * 150; break;
+                            }
+                        }
+                        if (!s.meta.originRates[k]) {
+                            const oldest = fullApiLogs.find(l => l.stat === k && l.cost > 0);
+                            if (oldest) s.meta.originRates[k] = (oldest.gain / oldest.cost) * 150;
+                        }
+                    }
+                });
+            }
+
+            this.saveSmartHistory(s);
+            window.dispatchEvent(new CustomEvent('bbgl:dataUpdated'));
+            return 'SUCCESS';
+        },
+        saveSmartHistory(d) {
+            // Flatten all series from bucket objects back to flat array for IndexedDB.
+            // Deduplicate by (ts, stat) — this is the safety net that self-heals any
+            // pre-existing duplication in the series caused by the stacking bug.
+            const seen = new Set();
+            const allSeries = [];
+            const allDays = [...(d.history || [])];
+            if (d.today) { allDays.push(d.today); }
+            allDays.forEach(day => {
+                if (day.series) {
+                    day.series.forEach(e => {
+                        const key = `${e.ts}_${e.stat}`;
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            allSeries.push(e);
+                        }
+                    });
+                }
+            });
+            allSeries.sort((a, b) => a.ts - b.ts);
+            const stored = { meta: d.meta, series: allSeries };
+            DBManager.setStorage(stored); // Fire-and-forget to IndexedDB (broadcast handled inside)
+            sessionStorage.removeItem(KEYS.SESSION_CACHE);
+            _historyCache = d; // Keep the rich bucket object in memory for this session
+            this.invalidate();
+        },
+
+        flattenAllSeries() {
+            const s = getActiveHistory();
+            const all = [];
+            const days = [...(s.history || [])];
+            if (s.today) days.push(s.today);
+            days.forEach(day => {
+                if (day.series && day.series.length > 0) {
+                    day.series.forEach(e => all.push(e));
+                } else {
+                    const base = Formatter.parse(day.date);
+                    const ts = Math.floor(base.getTime() / 1000) + 43200;
+                    STAT_KEYS.forEach(stat => {
+                        const gain = (day.gains && day.gains[stat]) || 0;
+                        const cost = (day.eSpent && day.eSpent[stat]) || 0;
+                        const after = (day.endBreakdown && day.endBreakdown[stat]) || 0;
+                        if (gain > 0 || cost > 0) all.push({ ts, stat, gain, cost, after, synthetic: true });
+                    });
+                }
+            });
+            return all.sort((a, b) => a.ts - b.ts);
+        },
+        _runGenesis(logs, bs, s) {
+            // 3. The Genesis Run: First-time setup. Anchors using per-stat API window analysis.
+            // Torn returns up to 100 entries per stat. The stat trained most heavily will have
+            // its 100-entry window reach back the shortest distance — it's the "bottleneck".
+            // We anchor to the day of that stat's oldest entry, guaranteeing every subsequent
+            // day has complete data for all stats. logStartDate is set to the day prior so the
+            // first logged day is always a full day.
+            const allLogs = [...logs].sort((a, b) => a.ts - b.ts);
+
+            let validLogs;
+            let anchorDay = null;
+            if (allLogs.length > 0) {
+                // Per-stat: find the oldest (minimum ts) entry for each stat.
+                // allLogs is sorted oldest→newest, so the first match per stat IS its oldest entry.
+                const statOldest = {};
+                STAT_KEYS.forEach(k => {
+                    const first = allLogs.find(l => l.stat === k);
+                    if (first) statOldest[k] = first.ts;
+                });
+
+                const trainedStats = Object.keys(statOldest);
+                if (trainedStats.length > 0) {
+                    // The anchor stat = the one whose oldest entry is MOST RECENT.
+                    // Its oldest entry marks the earliest point where we can guarantee
+                    // complete data — all other stats' windows reach back at least this far.
+                    const anchorTs = Math.max(...trainedStats.map(k => statOldest[k]));
+                    anchorDay = Formatter.dateLogical(anchorTs * 1000);
+                    validLogs = allLogs.filter(l => Formatter.dateLogical(l.ts * 1000) >= anchorDay);
+                } else {
+                    validLogs = allLogs;
+                }
+            } else {
+                validLogs = [];
+            }
+
+            // For each stat, capture the most recent log entry that predates anchorDay —
+            // the rate just before stored history begins. This runs unconditionally regardless
+            // of whether the stat also has post-anchor training, so stats like Dex (trained
+            // a year ago and again today) still get the correct pre-anchor origin rate.
+            if (!s.meta.originRates) s.meta.originRates = { ...ZERO_BREAKDOWN };
+            STAT_KEYS.forEach(k => {
+                for (let i = allLogs.length - 1; i >= 0; i--) {
+                    const l = allLogs[i];
+                    if (l.stat === k && l.cost > 0 && (!anchorDay || Formatter.dateLogical(l.ts * 1000) < anchorDay)) {
+                        s.meta.originRates[k] = (l.gain / l.cost) * 150;
+                        break;
+                    }
+                }
+            });
+
+            // Reverse Engineer Start Stats based on current Battlestats
+            const currentStats = bs ? { str: bs.strength, def: bs.defense, spd: bs.speed, dex: bs.dexterity } : { ...ZERO_BREAKDOWN };
+            let totalGains = { ...ZERO_BREAKDOWN };
+            validLogs.forEach(l => totalGains[l.stat] += l.gain);
+
+            // Establish the anchor: logStartDate = start of the day PRIOR to anchorDay.
+            // This guarantees anchorDay is always the first complete day in the logs.
+            let logStartTs;
+            if (anchorDay) {
+                const anchorDayMs = Formatter.parse(anchorDay).getTime(); // UTC midnight of anchorDay
+                logStartTs = Math.floor((anchorDayMs - 86400000) / 1000); // start of prior day
+            } else {
+                logStartTs = validLogs.length > 0 ? validLogs[0].ts : Math.floor(Date.now() / 1000);
+            }
+            s.meta.logStartDate = logStartTs;
+            s.meta.baselineBreakdown = { str: currentStats.str - totalGains.str, def: currentStats.def - totalGains.def, spd: currentStats.spd - totalGains.spd, dex: currentStats.dex - totalGains.dex };
+
+            let runningBreakdown = {
+                str: currentStats.str - totalGains.str, def: currentStats.def - totalGains.def,
+                spd: currentStats.spd - totalGains.spd, dex: currentStats.dex - totalGains.dex
+            };
+
+            const startDayStr = anchorDay || Formatter.dateLogical(validLogs.length > 0 ? validLogs[0].ts * 1000 : Date.now());
+            s.today = initializeDayObject(startDayStr, runningBreakdown);
+
+            // Forward-build history
+            validLogs.forEach(l => { this._applyLogToState(l, s); runningBreakdown[l.stat] = l.after; });
+
+            // Silently store pre-anchor logs as a buffer day — series only, no display stats.
+            // Clamped to logStartTs so we never pull in years-old data from infrequent stats.
+            if (anchorDay) {
+                const bufferLogs = allLogs.filter(l => {
+                    const d = Formatter.dateLogical(l.ts * 1000);
+                    return d < anchorDay && l.ts >= logStartTs;
+                });
+                if (bufferLogs.length > 0) {
+                    const bufDay = initializeDayObject(Formatter.dateLogical(bufferLogs[0].ts * 1000), { ...ZERO_BREAKDOWN });
+                    bufferLogs.forEach(l => bufDay.series.push({ ts: l.ts, stat: l.stat, gain: l.gain, cost: l.cost, after: l.after, rate: l.cost > 0 ? r2((l.gain / l.cost) * 150) : 0 }));
+                    s.history.unshift(bufDay);
+                }
+            }
+
+            if (bs) this._snapToBattlestats(bs, s);
+        },
+        _runDailyGrind(logs, bs, s) {
+            // 4. The Daily Grind: Fast, lightweight updates filtering out already-processed logs.
+            // BUGFIX: Was using s.today.lastLogTimestamp only, which resets to 0 on every day
+            // rollover or page reload — causing all prior days' logs to pass the filter and
+            // get re-applied as duplicate history entries. Must use the global max timestamp
+            // across all days, not just today's bucket.
+            const allDays = [...(s.history || []), s.today];
+            const globalLastTs = allDays.reduce((max, day) => Math.max(max, day.lastLogTimestamp || 0), 0);
+            const lastTs = Math.max(globalLastTs, s.meta.logStartDate || 0);
+            const validLogs = logs.filter(l => l.ts > lastTs);
+
+            validLogs.forEach(l => this._applyLogToState(l, s));
+            if (bs) this._snapToBattlestats(bs, s);
+        },
+        _applyLogToState(l, s) {
+            const logDate = Formatter.dateLogical(l.ts * 1000);
+
+            // Handle Day Rollover mid-loop
+            if (s.today.date !== logDate) {
+                if (s.today.startTotal > 0 || s.today.gains.total > 0) s.history.push(s.today);
+                s.today = initializeDayObject(logDate, s.today.endBreakdown);
+            }
+
+            // The core math
+            s.today.gains[l.stat] += l.gain; s.today.gains.total += l.gain;
+            s.today.eSpent[l.stat] += l.cost; s.today.eSpent.total += l.cost;
+            s.today.endBreakdown[l.stat] = l.after;
+            if (l.ts > s.today.lastLogTimestamp) s.today.lastLogTimestamp = l.ts;
+            s.today.series.push({ ts: l.ts, stat: l.stat, gain: l.gain, cost: l.cost, after: l.after, rate: l.cost > 0 ? r2((l.gain / l.cost) * 150) : 0 });
+
+            s.today.endTotal = sumStats(s.today.endBreakdown);
+        },
+        _snapToBattlestats(bs, s) {
+            let upd = false;
+            const m = [{ api: 'strength', abbr: 'str' }, { api: 'defense', abbr: 'def' }, { api: 'speed', abbr: 'spd' }, { api: 'dexterity', abbr: 'dex' }];
+
+            m.forEach(i => {
+                const apiVal = bs[i.api];
+                if (apiVal === undefined) return;
+                const localVal = s.today.endBreakdown[i.abbr] || 0;
+                const lg = s.today.gains[i.abbr] || 0;
+
+                // If reality doesn't match our log math, snap to reality.
+                if (localVal !== apiVal) {
+                    s.today.endBreakdown[i.abbr] = apiVal;
+                    s.today.startBreakdown[i.abbr] = apiVal - lg; // Adjust start line backward so gains still match
+                    upd = true;
+                }
+            });
+
+            if (upd) {
+                s.today.endTotal = sumStats(s.today.endBreakdown);
+                s.today.startTotal = sumStats(s.today.startBreakdown);
+            }
+        },
+        _rebuildFromSeries(seriesArr, baselineBreakdown) {
+            const days = {};
+            let running = { ...baselineBreakdown };
+            seriesArr.forEach(e => {
+                const dateKey = Formatter.dateLogical(e.ts * 1000);
+                if (!days[dateKey]) days[dateKey] = initializeDayObject(dateKey, { ...running });
+                days[dateKey].gains[e.stat] += e.gain;
+                days[dateKey].gains.total += e.gain;
+                days[dateKey].eSpent[e.stat] += e.cost;
+                days[dateKey].eSpent.total += e.cost;
+                days[dateKey].endBreakdown[e.stat] = e.after;
+                if (e.ts > days[dateKey].lastLogTimestamp) days[dateKey].lastLogTimestamp = e.ts;
+                if (!e.synthetic) days[dateKey].series.push(e);
+                running[e.stat] = e.after;
+            });
+            Object.values(days).forEach(day => { day.endTotal = sumStats(day.endBreakdown); day.startTotal = sumStats(day.startBreakdown); });
+            const logicalToday = Formatter.dateLogical();
+            const sortedKeys = Object.keys(days).sort();
+            const todayObj = days[logicalToday] || initializeDayObject(logicalToday, { ...running });
+            const history = sortedKeys.filter(k => k !== logicalToday).map(k => days[k]);
+            return { history, today: todayObj };
+        }
+    };
+
+    function generateDemoData() {
+        // Deterministic PRNG (mulberry32) seeded with a fixed constant
+        let _seed = 0x9e3779b9;
+        function rand() { _seed += 0x6d2b79f5; let t = _seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+        function randInt(lo, hi) { return lo + Math.floor(rand() * (hi - lo + 1)); }
+
+        const today = Formatter.dateLogical();
+        const todayMs = Formatter.parse(today).getTime();
+        const DAY_MS = 86400000;
+        const NUM_DAYS = 365;
+
+        // Simulation formula constants (Torn gym gain model)
+        const Simulation = {
+            A: 3.480061091e-7,
+            B: 250,
+            C: 3.091619094e-6,
+            D: 6.82775184551527e-5,
+            E: -0.0301431777,
+        };
+        const DEMO_GYM_DOTS = 9.0;
+        const DEMO_HAPPY = 4950;
+        const DEMO_MODIFIERS = 2.5;
+        const DEMO_E_PER_TRAIN = 5;
+        const DEMO_FORMULA_E_BASE = 10;
+
+        // Per-train gain: formula is published for a 10E train, scale to our 5E trains.
+        function simulationGain(statTotal) {
+            const happyFactor = DEMO_HAPPY + Simulation.B;
+            const base =
+                (Simulation.A * Math.log(happyFactor) + Simulation.C) * statTotal +
+                Simulation.D * happyFactor +
+                Simulation.E;
+            const perStandardTrain = base * DEMO_GYM_DOTS * DEMO_MODIFIERS;
+            const perTrain = perStandardTrain * (DEMO_E_PER_TRAIN / DEMO_FORMULA_E_BASE);
+            return Math.max(0, perTrain);
+        }
+
+        const statKeys = ['str', 'def', 'spd', 'dex'];
+
+        // Build date list oldest-first (364 prior days + today)
+        const dates = [];
+        for (let i = NUM_DAYS - 1; i >= 0; i--) {
+            const ms = todayMs - i * DAY_MS;
+            const d = new Date(ms);
+            dates.push(Formatter.dateISO(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+        }
+
+        // Seed each stat with a small random baseline (15k–25k) so the compounding
+        // term has something to multiply from day one — keeps the demo curve natural.
+        const baseline = {};
+        statKeys.forEach(k => { baseline[k] = 15000 + randInt(0, 10000); });
+
+        // Determine current week boundaries for jewel forcing
+        const weekStartOffset = userConfig.weekStartMode === 'mon' ? 1 : 0;
+        const todayDate = new Date(todayMs);
+        const todayDow = todayDate.getUTCDay(); // 0=Sun
+        const daysFromWeekStart = (todayDow - weekStartOffset + 7) % 7;
+        const weekDay0Str = dates[NUM_DAYS - 1 - daysFromWeekStart] || null; // first day of current week (may be undefined if > 364 ago)
+        const weekDay1Str = daysFromWeekStart >= 1 ? dates[NUM_DAYS - daysFromWeekStart] : null;
+
+        const running = { ...baseline };
+        const history = [];
+
+        dates.forEach((dateStr, idx) => {
+            // Day-category roll: 10% rest, 5% low-active (<1000), 85% green/gold (1000–1600)
+            const roll = rand();
+            if (roll < 0.10) return;
+
+            let eTotalRaw;
+            if (roll < 0.15) {
+                // Low-active day: 700–990 in steps of 10
+                eTotalRaw = randInt(70, 99) * 10;
+            } else {
+                // Green/gold day: 1000–1600 in steps of 10
+                eTotalRaw = randInt(100, 160) * 10;
+            }
+            // Jewel-forcing: first two active days of current week
+            if (dateStr === weekDay0Str) eTotalRaw = Math.max(eTotalRaw, 1500);
+            else if (dateStr === weekDay1Str) eTotalRaw = Math.min(Math.max(eTotalRaw, 1000), 1499);
+            const eTotal = eTotalRaw;
+
+            // Distribute energy across 1–4 stats
+            const numStats = randInt(1, 4);
+            const chosenStats = [...statKeys].sort(() => rand() - 0.5).slice(0, numStats);
+            const ePerStat = {};
+            let eRemain = eTotal;
+            chosenStats.forEach((k, i) => {
+                const share = i === chosenStats.length - 1 ? eRemain : Math.round((rand() * 0.4 + 0.1) * eTotal / numStats) * 10 || 10;
+                ePerStat[k] = Math.max(10, Math.min(share, eRemain));
+                eRemain -= ePerStat[k];
+            });
+            if (eRemain > 0 && chosenStats.length) ePerStat[chosenStats[0]] += eRemain;
+
+            const startBreakdown = { ...running };
+            const eSpent = { total: eTotal, ...ZERO_BREAKDOWN };
+            const gains = { total: 0, ...ZERO_BREAKDOWN };
+            const series = [];
+
+            const dayStartSec = Math.floor(Formatter.parse(dateStr).getTime() / 1000);
+
+            chosenStats.forEach(k => {
+                const cost = ePerStat[k] || 0;
+                if (!cost) return;
+                const trainsForStat = Math.floor(cost / DEMO_E_PER_TRAIN);
+                let statGainAccum = 0;
+                for (let t = 0; t < trainsForStat; t++) {
+                    const raw = simulationGain(running[k]);
+                    const jittered = raw * (0.97 + rand() * 0.06);
+                    running[k] += jittered;
+                    statGainAccum += jittered;
+                    const ts = dayStartSec + 36000 + Math.floor((t + rand()) * (28800 / Math.max(1, trainsForStat)));
+                    series.push({
+                        ts,
+                        stat: k,
+                        gain: Math.round(jittered),
+                        cost: DEMO_E_PER_TRAIN,
+                        after: Math.round(running[k]),
+                        rate: r2((Math.round(jittered) / DEMO_E_PER_TRAIN) * 150),
+                        synthetic: true,
+                    });
+                }
+                eSpent[k] = cost;
+                const roundedStatGain = Math.round(statGainAccum);
+                gains[k] = roundedStatGain;
+                gains.total += roundedStatGain;
+            });
+            // Recompute eSpent.total correctly from stat parts
+            eSpent.total = (eSpent.str + eSpent.def + eSpent.spd + eSpent.dex);
+
+            const endBreakdown = { ...running };
+            const day = initializeDayObject(dateStr, startBreakdown);
+            day.gains = gains;
+            day.eSpent = eSpent;
+            day.endBreakdown = endBreakdown;
+            day.endTotal = endBreakdown.str + endBreakdown.def + endBreakdown.spd + endBreakdown.dex;
+            day.series = series;
+            day.lastLogTimestamp = series.length ? series[series.length - 1].ts : 0;
+            history.push(day);
+        });
+
+        // Build today object
+        const lastHistDay = history.length ? history[history.length - 1] : null;
+        const todayStart = lastHistDay ? { ...lastHistDay.endBreakdown } : { ...running };
+        const todayObj = initializeDayObject(today, todayStart);
+
+        // Build meta with logStartDate set to day before oldest history day
+        const oldestDate = history.length ? history[0].date : today;
+        const logStartDate = Math.floor(Formatter.parse(oldestDate).getTime() / 1000) - 86400;
+        // Project per-10E gain at each stat's current total using Simulation formula.
+        const lastRates = {};
+        statKeys.forEach(k => {
+            const perFiveE = simulationGain(running[k]);
+            lastRates[k] = perFiveE * (DEMO_FORMULA_E_BASE / DEMO_E_PER_TRAIN);
+        });
+        const meta = { originRates: { ...lastRates }, baselineBreakdown: { ...baseline }, logStartDate };
+
+        return { meta, history, today: todayObj };
+    }
+
+    function getActiveHistory() {
+        if (runtime.demoMode) {
+            if (!runtime.demoHistory) runtime.demoHistory = generateDemoData();
+            return runtime.demoHistory;
+        }
+        // 1. In-memory cache — fastest path, used within a single call chain
+        if (_historyCache) return _historyCache;
+        // 2. Session cache — rebuilt buckets from this session, survives page navigation
+        const cached = sessionStorage.getItem(KEYS.SESSION_CACHE);
+        if (cached) { try { _historyCache = JSON.parse(cached); return _historyCache; } catch (e) { } }
+        // 3. Safety fallback — init() pre-populates from IndexedDB, so this should
+        //    only trigger if both caches were cleared mid-session. Return empty state.
+        //    IMPORTANT: Do NOT cache this empty result. Leaving _historyCache as null
+        //    allows the next async cache population (BroadcastChannel handler, init,
+        //    or processDataPayload) to replace it with real data. Caching the empty
+        //    state here would poison every subsequent synchronous call and prevent
+        //    the UI from ever recovering until a full page reload.
+        return { meta: { baselineBreakdown: { ...ZERO_BREAKDOWN } }, history: [], today: initializeDayObject(Formatter.dateLogical(), { ...ZERO_BREAKDOWN }) };
+    }
+
+    // ========================================================================
+    // THE DATA PIPELINE (Normalization -> Filtration -> Mutation -> Commit)
+    // ========================================================================
+
+    // 1. Normalization: Turns messy Torn API logs into clean, flat objects
+    function normalizeApiLogs(rawLogs) {
+        if (!rawLogs || Object.keys(rawLogs).length === 0) return [];
+        return Object.keys(rawLogs).map(k => {
+            const l = rawLogs[k];
+            const sn = GAME.STAT_MAP[l.log];
+            if (!sn) return null; // Ignore non-gym logs
+            const ab = (sn === 'strength') ? 'str' : (sn === 'defense') ? 'def' : (sn === 'speed') ? 'spd' : 'dex';
+            return { id: k, ts: l.timestamp, stat: ab, key: sn, gain: r2(parseFloat(l.data[`${sn}_increased`] || 0)), after: r2(parseFloat(l.data[`${sn}_after`] || 0)), cost: parseInt(l.data.energy_used || 0) };
+        }).filter(x => x !== null).sort((a, b) => a.ts - b.ts);
+    }
+
+    // --- PIPELINE HELPERS ---
+
+    function initializeDayObject(dateStr, baseBreakdown) {
+        const b = { ...baseBreakdown };
+        return { date: dateStr, startTotal: b.str + b.def + b.spd + b.dex, endTotal: b.str + b.def + b.spd + b.dex, startBreakdown: { ...b }, endBreakdown: { ...b }, gains: { total: 0, ...ZERO_BREAKDOWN }, eSpent: { total: 0, ...ZERO_BREAKDOWN }, lastLogTimestamp: 0, series: [] };
+    }
+
+    function computeAchievements(s) {
+        const allDays = [...(s.history || [])];
+        if (s.today && s.today.date) { const filtered = allDays.filter(d => d.date !== s.today.date); filtered.push(s.today); allDays.splice(0, allDays.length, ...filtered); }
+        allDays.sort((a, b) => a.date.localeCompare(b.date));
+        if (!allDays.length) return null;
+        const GREEN = 1000, GOLD = 1500;
+        let greenDays = 0, goldDays = 0, belowGoalDays = 0, trainingDays = 0;
+        let maxEDay = { value: 0, date: null }, maxGainsDay = { value: 0, date: null }, maxClick = { value: 0, date: null, stat: null };
+        const weekE = {}, weekG = {}, monthE = {}, monthG = {}, weekDayMap = {};
+        allDays.forEach(day => {
+            const e = (day.eSpent && day.eSpent.total) || 0, g = (day.gains && day.gains.total) || 0;
+            if (e >= GOLD) { goldDays++; trainingDays++; } else if (e >= GREEN) { greenDays++; trainingDays++; } else if (e > 0) { belowGoalDays++; trainingDays++; }
+            if (e > maxEDay.value) maxEDay = { value: e, date: day.date };
+            if (g > maxGainsDay.value) maxGainsDay = { value: g, date: day.date };
+            (day.series || []).forEach(entry => { if ((entry.gain || 0) > maxClick.value) maxClick = { value: entry.gain, date: day.date, stat: entry.stat }; });
+            const wk = getWeekKey(day.date), mk = day.date.slice(0, 7);
+            weekE[wk] = (weekE[wk] || 0) + e; weekG[wk] = (weekG[wk] || 0) + g;
+            monthE[mk] = (monthE[mk] || 0) + e; monthG[mk] = (monthG[mk] || 0) + g;
+            if (!weekDayMap[wk]) weekDayMap[wk] = []; weekDayMap[wk].push(day);
+        });
+        const maxOf = (obj, key) => Object.entries(obj).reduce((best, [k, v]) => v > best.value ? { [key]: k, value: v } : best, { value: 0, [key]: null });
+        const fmtMonth = mk => mk ? `${CONSTANTS.MONTHS[parseInt(mk.slice(5)) - 1]} ${mk.slice(0, 4)}` : null;
+        let perfectWeeks = 0;
+        const todayStr = Formatter.dateLogical(), currentWk = getWeekKey(todayStr);
+        Object.keys(weekDayMap).sort().forEach(wk => { if (wk < currentWk && computeWeekCompletion(weekDayMap[wk]).isCompleted) perfectWeeks++; });
+        let longestStreak = 0, streak = 0, prevDate = null;
+        allDays.forEach(day => {
+            const e = (day.eSpent && day.eSpent.total) || 0;
+            if (!e) { streak = 0; prevDate = null; return; }
+            streak = prevDate && (new Date(day.date + 'T00:00:00Z') - new Date(prevDate + 'T00:00:00Z')) / 86400000 === 1 ? streak + 1 : 1;
+            if (streak > longestStreak) longestStreak = streak;
+            prevDate = day.date;
+        });
+        const calDays = Math.round((new Date(allDays[allDays.length - 1].date + 'T00:00:00Z') - new Date(allDays[0].date + 'T00:00:00Z')) / 86400000) + 1;
+        const mxWkE = maxOf(weekE, 'weekOf'), mxWkG = maxOf(weekG, 'weekOf'), mxMnE = maxOf(monthE, 'month'), mxMnG = maxOf(monthG, 'month');
+        return {
+            baseline: (s.meta && s.meta.baselineBreakdown) ? { ...s.meta.baselineBreakdown } : null,
+            greenDays, goldDays, trainingDays,
+            trainingDaysBelowGoal: { count: belowGoalDays, ofTrainingDays: trainingDays, percent: trainingDays > 0 ? ((belowGoalDays / trainingDays) * 100).toFixed(1) + '%' : 'N/A' },
+            trainingRestRatio: calDays > 0 ? ((trainingDays / calDays) * 100).toFixed(1) + '%' : 'N/A',
+            longestStreak, perfectWeeks,
+            mostEInOneDay: maxEDay.date ? maxEDay : null,
+            mostEInOneWeek: mxWkE.weekOf ? mxWkE : null,
+            mostEInOneMonth: mxMnE.month ? { value: mxMnE.value, month: fmtMonth(mxMnE.month) } : null,
+            highestGainPerClick: maxClick.date ? maxClick : null,
+            highestGainsInOneDay: maxGainsDay.date ? maxGainsDay : null,
+            highestGainsInOneWeek: mxWkG.weekOf ? mxWkG : null,
+            highestGainsInOneMonth: mxMnG.month ? { value: mxMnG.value, month: fmtMonth(mxMnG.month) } : null
+        };
+    }
+
+    async function exportData() {
+        const s = await DBManager.getStorage() || {};
+        const now = new Date();
+        const month = CONSTANTS.MONTHS[TimeManager.month(now)];
+        const day = TimeManager.date(now);
+        const year = TimeManager.year(now);
+        const filename = `BBGymLogData - ${month} ${day}_${year}.json`;
+        // Ensure the sticker state snapshot is current (getStickerMap is cached after
+        // the first call this session, so this is effectively free if the calendar
+        // has already rendered). Then overlay the computed states into the export
+        // payload — the DB record may be stale but the in-memory snapshot is always
+        // authoritative for the current session.
+        DataController.getStickerMap();
+        if (_historyCache && _historyCache.meta && _historyCache.meta.stickers) {
+            if (!s.meta) s.meta = {};
+            s.meta.stickers = _historyCache.meta.stickers;
+        }
+        const use24h = !new Intl.DateTimeFormat(navigator.language, { hour: 'numeric' }).format(new Date(0)).match(/AM|PM/i);
+        const ordinal = n => { const sfx = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (sfx[(v - 20) % 10] || sfx[v] || sfx[0]); };
+        const tzName = (() => { try { return new Intl.DateTimeFormat('en', { timeZoneName: 'short' }).formatToParts(now).find(p => p.type === 'timeZoneName').value; } catch (e) { return ''; } })();
+        const fmtTs = ts => {
+            const d = new Date(ts * 1000); // series timestamps are Unix seconds, not ms
+            const utcStr = `${CONSTANTS.MONTHS[d.getUTCMonth()]} ${ordinal(d.getUTCDate())}, ${d.getUTCFullYear()} - ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+            const lH = d.getHours(), lM = String(d.getMinutes()).padStart(2, '0');
+            const localStr = use24h ? `${String(lH).padStart(2, '0')}:${lM}` : `${lH % 12 || 12}:${lM}${lH >= 12 ? 'pm' : 'am'}`;
+            return `${utcStr} / ${localStr}${tzName ? ` ${tzName}` : ''}`;
+        };
+        const exportStorage = JSON.parse(JSON.stringify(s));
+        // Raw DB storage is { meta, series: [...] } — history/today only live in-memory.
+        // Stamp each flat series entry directly and round stats to save space.
+        (exportStorage.series || []).forEach(e => {
+            e.loggedAt = fmtTs(e.ts);
+            if (typeof e.gain === 'number') e.gain = r2(e.gain);
+            if (typeof e.after === 'number') e.after = r2(e.after);
+        });
+        // computeAchievements needs the rich in-memory structure, not the flat DB blob.
+        const achievements = computeAchievements(getActiveHistory());
+        const cleanCfg = {}; ALLOWED_CONFIG_KEYS.forEach(k => { if (userConfig[k] !== undefined) cleanCfg[k] = userConfig[k]; });
+
+        // Extract stickers and remove from storage to "hide" them at the top-level bottom
+        const stickers = exportStorage?.meta?.stickers;
+        if (exportStorage.meta) delete exportStorage.meta.stickers;
+
+        const content = JSON.stringify({
+            meta: { version: "0.9.96", exportedAt: now.toISOString() },
+            config: cleanCfg,
+            storage: exportStorage,
+            achievements,
+            _s: stickers ? JSON.stringify(stickers) : undefined
+        }, null, 2);
+
+        try { const f = new File([content], filename, { type: 'text/plain' }); if (navigator.canShare && navigator.canShare({ files: [f] }) && window.innerWidth <= 800) { await navigator.share({ title: filename, files: [f] }); return; } } catch (e) { }
+
+        const blob = new Blob([content], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+
+        // ⚠️ CRITICAL MOBILE FIX: Do not instantly revoke the URI.
+        // WebViews (like Torn PDA) handle downloads asynchronously by passing them
+        // to the native OS layer. If we destroy the URI here, the native layer
+        // receives a 404/dead link and silently does nothing.
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 3000);
+    }
+    function importData(f, onDone, opts = {}) {
+        if (!f) { if (onDone) onDone(false); return; }
+        const silent = !!opts.silent;
+        const r = new FileReader();
+        r.onload = async (e) => {
+            let ok = false;
+            try {
+                const j = JSON.parse(e.target.result);
+                const val = validateImportSchema(j);
+                if (!val.ok) { if (!silent) alert(`Import Failed: ${val.msg}`); if (onDone) onDone(false); return; }
+
+                if (j.storage) {
+                    // Scrub and sanitize before commit
+                    j.storage = sanitizeStorageRecord(j.storage);
+
+                    // Preserve sticker states from the imported file. Check legacy storage location
+                    // and new "hidden" top-level stringified location (_s).
+                    const importedMeta = j.storage.meta || {};
+                    let stickers = importedMeta.stickers || j._s;
+                    if (typeof stickers === 'string') { try { stickers = JSON.parse(stickers); } catch (e) { } }
+                    if (!stickers) stickers = {};
+
+                    // CRITICAL: Re-inject stickers into the storage meta BEFORE committing to DB.
+                    // If we don't do this, a sync triggered immediately after import will load
+                    // the sticker-less DB record and clobber the authoritative stickers in memory.
+                    j.storage.meta.stickers = stickers;
+
+                    await DBManager.setStorage(j.storage);
+
+                    // Rebuild in-memory state from the imported data
+                    const rebuilt = DataController._rebuildFromSeries(j.storage.series || [], (j.storage.meta && j.storage.meta.baselineBreakdown) || ZERO_BREAKDOWN);
+
+                    _historyCache = { meta: { ...importedMeta, stickers }, history: rebuilt.history, today: rebuilt.today };
+                    sessionStorage.setItem(KEYS.SESSION_CACHE, JSON.stringify(_historyCache));
+                    if (j.config && typeof j.config === 'object') {
+                        ALLOWED_CONFIG_KEYS.forEach(k => { if (j.config[k] !== undefined) userConfig[k] = j.config[k]; });
+                        saveConfig();
+                    }
+                    DataController.invalidate();
+                    calendarState.selectedData = null;
+                    calendarState.selectedLabel = null;
+                    viewState.activeViewLabel = null;
+                    ok = true;
+                    if (!silent) renderPanelContent();
+                    if (!silent) alert("Training Data Imported Successfully.");
+                } else if (!silent) alert("Error: No valid training data found.");
+            } catch (err) { if (!silent) alert("Error importing file: Invalid JSON format."); }
+            const inp = document.getElementById('import-file');
+            if (inp) inp.value = '';
+            const inp2 = document.getElementById('init-import-file');
+            if (inp2) inp2.value = '';
+            if (onDone) onDone(ok);
+        };
+        r.readAsText(f);
+    }
+
+    function importDataFromWelcome(f) {
+        importData(f, async (success) => {
+            if (!success) return;
+            // userConfig has been merged from the import at this point — refresh lock state
+            refreshInitLock();
+            if (!userConfig.apiKey) {
+                renderPanelContent();
+                const wv = dom.welcomeView; if (wv && wv.classList.contains('active-view')) refreshInitMask(wv);
+                return;
+            }
+            try {
+                const res = await fetch(`https://api.torn.com/user/?selections=battlestats,log&log=5300&key=${userConfig.apiKey}`);
+                const data = await res.json();
+                if (data.error) {
+                    alert(`Saved API key is no longer valid: ${data.error.error}\n\nPlease enter a new key to continue.`);
+                    userConfig.apiKey = '';
+                    saveConfig();
+                    refreshInitLock();
+                    renderPanelContent();
+                    const wv = dom.welcomeView; if (wv && wv.classList.contains('active-view')) {
+                        refreshInitMask(wv);
+                        const iak = wv.querySelector('#init-api-key'); if (iak) iak.value = '';
+                    }
+                    return;
+                }
+                localStorage.setItem('bbgl_initialized', '1');
+                refreshInitLock();
+                calendarState.selectedData = null;
+                calendarState.selectedLabel = Formatter.dateLogical();
+                viewState.activeViewLabel = null;
+                switchView('ledger');
+                syncWithFeedback('FULL_SYNC');
+            } catch (e) {
+                alert("Network error during API key verification. Please try again.");
+                renderPanelContent();
+                const wv = dom.welcomeView; if (wv && wv.classList.contains('active-view')) refreshInitMask(wv);
+            }
+        }, { silent: true });
+    }
+    async function clearData() {
+        if (confirm("⚠️ CLEAR LOG HISTORY? ⚠️\n\nThis will permanently delete your training data.\n\nUse 'Export Log' before proceeding to preserve it.")) {
+            await DBManager.clearStorage();
+            // Clear non-storage bbgl_ keys from localStorage (revealed stickers, etc.)
+            const keep = [KEYS.CONFIG, KEYS.STATE];
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith('bbgl_') && k !== KEYS.STORAGE && !keep.includes(k)) localStorage.removeItem(k);
+            }
+            sessionStorage.removeItem(KEYS.SESSION);
+            sessionStorage.removeItem(KEYS.SESSION_CACHE);
+            DataController.invalidate();
+            _historyCache = null;
+            calendarState.selectedData = null;
+            calendarState.selectedLabel = null;
+            viewState.activeViewLabel = null;
+            runtime.apiCallTotal = 0;
+            runtime.stickerSlots = [];
+            renderPanelContent();
+            alert("History cleared.");
+        }
+    }
+
+    async function devFactoryReset() {
+        if (confirm("⚠️ DEV FACTORY RESET ⚠️\n\nThis will completely wipe ALL data, settings, API keys, and cache. The script will emulate a completely fresh install.\n\nProceed?")) {
+            await DBManager.clearStorage();
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.reload();
+        }
+    }
+
+    /**
+     *  [SECTION IV] THE CHECK-IN COUNTER (Network Layer)
+     *  ========================================================================
+     *  Badge in. Smuggling data packets past the front desk. Fast, quiet, and
+     *  reliable. Now featuring Smart Escalation.
+     */
+
+    async function universalFetch(mission, options = {}) {
+        if (runtime.demoMode) return { success: false, demo: true };
+        const { specId = null } = options;
+
+        // 1. API Key Validation
+        if (!userConfig.apiKey || userConfig.apiKey.length < 16) {
+            return { ok: false, error: 'API Key is missing or too short.' };
+        }
+
+        const ts = Date.now();
+        let reqs = [];
+
+        // 2. The Chisel (Build the Request Payload)
+        if (mission === 'TRAIN_SINGLE' && specId) {
+            reqs.push({ type: 'log', id: specId, url: `https://api.torn.com/user/?selections=log&log=${specId}&key=${userConfig.apiKey}&timestamp=${ts}` });
+        } else if (mission === 'BATTLESTATS_ONLY') {
+            reqs.push({ type: 'battlestats', url: `https://api.torn.com/user/?selections=battlestats&key=${userConfig.apiKey}&timestamp=${ts}` });
+        } else { // FULL_SYNC
+            reqs = [
+                { type: 'log', id: 5300, url: `https://api.torn.com/user/?selections=log&log=5300&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'log', id: 5301, url: `https://api.torn.com/user/?selections=log&log=5301&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'log', id: 5302, url: `https://api.torn.com/user/?selections=log&log=5302&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'log', id: 5303, url: `https://api.torn.com/user/?selections=log&log=5303&key=${userConfig.apiKey}&timestamp=${ts}` },
+                { type: 'battlestats', url: `https://api.torn.com/user/?selections=battlestats&key=${userConfig.apiKey}&timestamp=${ts}` }
+            ];
+        }
+
+        incrementApiCount(reqs.length);
+
+        try {
+            // 3. The Execution
+            const res = await Promise.all(reqs.map(c => fetch(c.url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => ({ cfg: c, data: d }))));
+            const errObj = res.find(r => r.data.error);
+            if (errObj) {
+                const c = errObj.data.error.code, m = errObj.data.error.error;
+                throw new Error(m);
+            }
+
+            let logs = {}, bs = null;
+            res.forEach(r => {
+                if (r.cfg.type === 'log' && r.data.log) logs = { ...logs, ...r.data.log };
+                else if (r.cfg.type === 'battlestats') bs = r.data;
+            });
+
+            // 4. The Routing & Smart Escalation
+            if (mission === 'BATTLESTATS_ONLY') {
+                if (bs) {
+                    const d = getActiveHistory();
+                    let escalationNeeded = false;
+                    const m = [{ api: 'strength', abbr: 'str' }, { api: 'defense', abbr: 'def' }, { api: 'speed', abbr: 'spd' }, { api: 'dexterity', abbr: 'dex' }];
+
+                    // Tripwire: Did stats go up unexpectedly since we last checked?
+                    m.forEach(i => {
+                        const apiVal = bs[i.api];
+                        const localVal = d.today?.endBreakdown?.[i.abbr] || 0;
+                        if (apiVal > localVal) escalationNeeded = true;
+                    });
+
+                    if (escalationNeeded) {
+                        return universalFetch('FULL_SYNC', options); // Immediately escalate
+                    } else {
+                        await DataController.processDataPayload({}, bs); // No discrepancy, update safely via pipeline
+                    }
+                }
+                localStorage.setItem(KEYS.BS_SYNC, ts.toString());
+            } else { // FULL_SYNC & TRAIN_SINGLE both push through the master pipeline
+                if (mission === 'FULL_SYNC') {
+                    localStorage.setItem(KEYS.LAST_SYNC, ts.toString());
+                    localStorage.setItem(KEYS.BS_SYNC, ts.toString());
+                }
+                await DataController.processDataPayload(logs, bs);
+            }
+
+            return { ok: true };
+
+        } catch (e) {
+            console.error(e);
+            return { ok: false, error: e.message || 'Network Error' };
+        }
+    }
+
+    // UI wrapper for syncs that need button feedback (manual refresh, initial registration).
+    // Background syncs call universalFetch directly — they need no button state management.
+    async function syncWithFeedback(mission, options = {}) {
+        const btn = dom.refreshBtn;
+        if (btn) {
+            btn.style.opacity = "0.4";
+            if (!btn.dataset.originalText) btn.dataset.originalText = btn.innerText;
+            btn.innerText = "Syncing...";
+        }
+
+        const result = await universalFetch(mission, options);
+
+        if (result.ok) {
+            if (btn) {
+                btn.innerText = "Refreshed!"; btn.style.color = "#43a047"; btn.style.opacity = "1";
+                if (btn.dataset.timerId) clearTimeout(btn.dataset.timerId);
+                btn.dataset.timerId = setTimeout(() => { resetRefreshBtn(btn); }, 2000);
+            }
+        } else {
+            alert("Sync Error: " + result.error);
+            resetRefreshBtn(btn);
+        }
+    }
+
+    // Unified 10-Minute Background Manager
+    function startBackgroundSync() {
+        setInterval(() => {
+            const now = Date.now();
+            const lastFull = parseInt(localStorage.getItem(KEYS.LAST_SYNC) || '0');
+            // If it's been over 1 Hour (3,600,000 ms), Full Sync. Otherwise, Battlestats Only.
+            if (now - lastFull > 3600000) universalFetch('FULL_SYNC');
+            else universalFetch('BATTLESTATS_ONLY');
+        }, 600000); // 10 minutes
+    }
+
+    function checkStaleness() {
+        const lastFull = localStorage.getItem(KEYS.LAST_SYNC), now = Date.now();
+        if (!lastFull || (now - parseInt(lastFull) > 3600000)) universalFetch('FULL_SYNC');
+        else {
+            const lastBs = localStorage.getItem(KEYS.BS_SYNC);
+            if (!lastBs || (now - parseInt(lastBs) > 600000)) universalFetch('BATTLESTATS_ONLY');
+        }
+    }
+
+    function checkExitSync() {
+        const f = sessionStorage.getItem(KEYS.SESSION);
+        if (f === 'true' && !window.location.href.includes('gym.php')) {
+            universalFetch('FULL_SYNC');
+            sessionStorage.removeItem(KEYS.SESSION);
+        }
+    }
+    /**
+     *  [SECTION V] THE EQUIPMENT (UI Layer)
+     *  ========================================================================
+     *  The machinery. Constructing the gym from raw DOM elements. Heavy duty
+     *  and built to last.
+     */
+
+    function renderPanelContent() {
+        const s = getActiveHistory(), dm = DataController.getDateMap(), tk = Formatter.dateLogical(); if ((s.today.startTotal > 0 || s.today.date) && !dm[tk]) dm[tk] = s.today;
+        const c = dom.calContainer; if (!c) return; c.innerHTML = '';
+        const y = calendarState.year, m = calendarState.month, yt = dom.yearTrigger; dom.monthTrigger.textContent = CONSTANTS.MONTHS[m]; yt.textContent = y; yt.classList.remove('disabled');
+        let f = new Date(y, m, 1), start = f.getDay(); if (start === -1) start = 6; if (userConfig.weekStartMode === 'mon') start = (start === 0) ? 6 : start - 1;
+        const dim = new Date(y, m + 1, 0).getDate(), dipm = new Date(y, m, 0).getDate(); let pm = m - 1, py = y; if (pm < 0) { pm = 11; py--; }
+        let cells = []; for (let i = 0; i < start; i++) cells.push({ y: py, m: pm, d: dipm - start + i + 1, g: true });
+        for (let d = 1; d <= dim; d++) cells.push({ y: y, m: m, d: d, g: false });
+        let rem = 7 - (cells.length % 7); if (rem < 7 && rem > 0) { let nm = m + 1, ny = y; if (nm > 11) { nm = 0; ny++; } for (let i = 1; i <= rem; i++) cells.push({ y: ny, m: nm, d: i, g: true }); }
+        calendarState.visibleCells = cells.map(z => Formatter.dateISO(z.y, z.m, z.d));
+
+        c.style.setProperty('--total-rows', 6); c.style.setProperty('--bg-url', 'url(https://i.imgur.com/3YOC5Mq.jpeg)');
+        const todayStr = Formatter.dateLogical();
+        const frag = document.createDocumentFragment();
+        let batch = [], ridx = 0;
+        cells.forEach(z => {
+            const ds = Formatter.dateISO(z.y, z.m, z.d), d = dm[ds] || null; batch.push({ ...z, p: d });
+            if (batch.length === 7) {
+                const rd = document.createElement('div'), last = batch[6], weekEndStr = Formatter.dateISO(last.y, last.m, last.d), isArch = weekEndStr < todayStr;
+                rd.className = 'bbgl-row-slice' + (isArch ? ' bbgl-row-archived' : ''); rd.style.setProperty('--row-idx', ridx); if (isArch) rd.style.setProperty('--bg-url', 'url(https://i.imgur.com/DnsZClm.jpeg)');
+                let wdb = []; batch.forEach((i, cIdx) => { renderCell(rd, i.y, i.m, i.d, i.g, ridx, cIdx); wdb.push({ date: Formatter.dateISO(i.y, i.m, i.d), data: i.p }); });
+                frag.appendChild(rd); injectWeeklyBar(frag, wdb); batch = []; ridx++;
+            }
+        });
+        c.appendChild(frag);
+
+        const tp = dom.topPanel;
+        if (tp) {
+            if (tp.classList.contains('viewing-graph')) GraphController.draw();
+            else if (tp.classList.contains('viewing-stickers')) renderStickers();
+        }
+
+        if (!calendarState.selectedData) renderStats(DataController.getSlice('DAY', Formatter.dateLogical()), Formatter.dateLogical()); else renderStats(calendarState.selectedData, calendarState.selectedLabel);
+        dom.monthTrigger.setAttribute('data-tooltip-html', generateRichTooltip(DataController.getSlice('MONTH', CONSTANTS.MONTHS[m], y))); yt.setAttribute('data-tooltip-html', generateRichTooltip(DataController.getSlice('YEAR', String(y))));
+    }
+    function renderCell(cont, y, m, d, g, rIdx, cIdx) {
+        const ds = Formatter.dateISO(y, m, d), sl = DataController.getSlice('DAY', ds), isFlipped = cont.classList.contains('bbgl-row-archived'), cell = document.createElement('div');
+        cell.className = 'bbgl-day-cell' + (isFlipped ? ' is-archived' : '') + (g ? ' ghost-cell' : '');
+        cell.dataset.date = ds;
+        cell.addEventListener('mouseenter', () => { if (userConfig.animations) cell.classList.add('shimmer-active'); });
+        cell.addEventListener('mouseleave', () => { if (!cell.classList.contains('is-viewing')) cell.classList.remove('shimmer-active'); });
+        const isToday = (ds === Formatter.dateLogical());
+
+        // --- Jewel & Plate Rendering ---
+        if (isFlipped && sl.meta.tier > 0) {
+            const t2 = sl.meta.tier === 2, url = t2 ? 'url(https://i.imgur.com/4jIlWjq.jpeg)' : 'url(https://i.imgur.com/T1WNeNR.jpeg)';
+            cell.style.backgroundImage = url; cell.style.backgroundSize = "700% 600%"; cell.style.backgroundPosition = `${(cIdx * (100 / 6)).toFixed(4)}% ${(rIdx * (100 / 5)).toFixed(4)}%`;
+        }
+        if (!isFlipped && sl.meta.tier > 0) {
+            const wrap = document.createElement('div'), img = document.createElement('img'), sh = document.createElement('div'), t2 = sl.meta.tier === 2;
+            const url = t2 ? 'https://i.imgur.com/85QmLUf.png' : 'https://i.imgur.com/bpzmbqt.png';
+            wrap.className = `jewel-wrapper jewel-type-${t2 ? 'gold' : 'green'}`; img.className = 'jewel-asset'; img.src = url;
+            if (t2) {
+                sh.className = 'jewel-shine'; sh.style.maskImage = `url('${url}')`; sh.style.webkitMaskImage = `url('${url}')`;
+                wrap.appendChild(img); wrap.appendChild(sh);
+            } else {
+                sh.className = 'jewel-shine'; sh.style.maskImage = `url('${url}')`; sh.style.webkitMaskImage = `url('${url}')`;
+                const so = document.createElement('div');
+                so.className = 'jewel-shine-over';
+                so.style.setProperty('--jewel-mask', `url('${url}')`);
+                wrap.appendChild(sh); wrap.appendChild(img); wrap.appendChild(so);
+            } cell.appendChild(wrap); cell.classList.add('is-plate');
+        }
+
+        const ns = document.createElement('span'); ns.className = 'day-num'; ns.innerText = d; cell.appendChild(ns);
+
+        // --- Sticker Rendering ---
+        if (isFlipped && sl.meta.tier > 0) {
+            const item = DataController.getStickerMap().get(ds);
+            if (item) {
+                const uid = Math.floor(new Date(Date.UTC(y, m, d)).getTime() / 86400000), isGold = sl.meta.tier === 2;
+                const sw = document.createElement('div'), si = document.createElement('img'), ss = document.createElement('div');
+                sw.className = 'sticker-wrapper'; sw.style.setProperty('--rot', `${(uid * 17) % 21 - 10}deg`);
+                si.src = item.url; si.className = 'cell-sticker-deco'; sw.appendChild(si);
+                ss.className = 'sticker-shine'; ss.style.webkitMaskImage = `url('${item.url}')`; ss.style.maskImage = `url('${item.url}')`;
+                ss.style.backgroundImage = isGold ? `linear-gradient(115deg,rgba(184,134,11,0.7) 0%,rgba(212,175,55,0.85) 11%,rgba(255,255,240,1.0) 13%,rgba(212,175,55,0.8) 15%,rgba(0,255,255,0.7) 35%,rgba(255,0,255,0.85) 65%,rgba(0,150,255,0.9) 80%,rgba(184,134,11,0.85) 100%)` : `linear-gradient(115deg,rgba(0,200,150,0.55) 0%,rgba(0,255,180,0.65) 20%,rgba(0,255,255,0.7) 35%,rgba(255,255,255,0.75) 50%,rgba(255,0,255,0.85) 65%,rgba(0,150,255,0.9) 80%,rgba(0,200,150,0.85) 100%)`;
+                ss.style.mixBlendMode = "overlay";
+                if (isGold) ss.style.filter = "brightness(1.5)";
+                sw.appendChild(ss); cell.appendChild(sw);
+                // Show the post-it only when the sticker is on a featured day AND
+                // the post-it has NOT been permanently cleared (second state char is '-').
+                if (DataController._cache.featuredDays && DataController._cache.featuredDays.has(ds) && !DataController.isStickerCleared(item.id)) {
+                    const pi = document.createElement('div');
+                    pi.className = 'new-sticker-post-it';
+                    pi.onclick = (e) => {
+                        e.stopPropagation();
+                        cell.style.setProperty('overflow', 'visible', 'important');
+                        cell.style.setProperty('z-index', '100', 'important');
+                        pi.classList.add('post-it-rip');
+                        DataController.markStickerCleared(item.id);
+                        setTimeout(() => {
+                            if (pi.parentNode) pi.remove();
+                            cell.style.removeProperty('overflow');
+                            cell.style.removeProperty('z-index');
+                            cell.click();
+                        }, 600);
+                    };
+                    cell.appendChild(pi);
+                }
+            }
+        }
+
+        if (isToday) cell.id = `active-date-today`;
+        if ((calendarState.selectedLabel === ds) || (!calendarState.selectedLabel && isToday)) cell.classList.add('is-viewing');
+        const h = getActiveHistory();
+        const tl = DataController.getTimeline();
+        const firstDate = tl.length > 0 ? tl[0].date : (h ? h.today.date : null);
+        const isInteractive = !sl.meta.isGap || (firstDate && ds >= firstDate && ds <= Formatter.dateLogical());
+
+        if (isInteractive) cell.setAttribute('data-tooltip-html', generateRichTooltip(sl)); else cell.setAttribute('data-tooltip', TOOLTIPS.CELL_DATE(ds));
+        cell.onclick = () => { if (isToday) closeHistory(); else if (isInteractive) openHistory(sl, ds); };
+        cont.appendChild(cell);
+        if (isInteractive && viewState.activeViewLabel === ds && calendarState.selectedLabel !== ds) openHistory(sl, ds);
+    }
+    function injectWeeklyBar(cont, batch) {
+        const sl = DataController.getSlice('CUSTOM', batch.map(w => w.data).filter(d => d));
+        sl.label = `Week ${getISOWeek(batch[0].date)}`;
+        if (sl._dailyList.length === 0) return;
+
+        let tot = 0;
+        let segs = [];
+        let numGold = 0;
+        let numGreen = 0;
+
+        // 1. Collect real-time segments (No 'completed day' block)
+        sl._dailyList.forEach(d => {
+            const e = d.eSpent.total || 0;
+            let v = 0, t = 'none';
+            if (e >= 1500) { v = 1500; t = 'gold'; numGold++; }
+            else if (e >= 1000) { v = 1000; t = 'green'; numGreen++; }
+
+            if (t !== 'none') {
+                segs.push({ t: t, v: v });
+                tot += v;
+            }
+        });
+
+        // 2. Rule: 3 Gold Days + at least 3 Green Days = entirely gold bar
+        if (numGold >= 3 && numGreen >= 3) {
+            segs = [{ t: 'gold', v: GAME.WEEKLY_GOAL }];
+        } else {
+            // Fluid Displacement (The Backward Paintbrush)
+            let overflow = Math.max(0, tot - GAME.WEEKLY_GOAL);
+            if (overflow > 0) {
+                for (let i = segs.length - 1; i >= 0; i--) {
+                    if (overflow <= 0) break;
+                    // Gold overrides Green. Subtract overflow from Green blocks.
+                    if (segs[i].t === 'green') {
+                        const deduct = Math.min(segs[i].v, overflow);
+                        segs[i].v -= deduct;
+                        overflow -= deduct;
+                    }
+                }
+            }
+        }
+
+        // 3. Render the UI
+        const anchor = document.createElement('div'); anchor.className = 'bbgl-weekly-anchor';
+        const tr = document.createElement('div'); tr.className = 'bbgl-weekly-track'; tr.dataset.label = sl.label;
+
+        const goal = tot >= GAME.WEEKLY_GOAL;
+        if (goal && userConfig.animations) tr.classList.add('track-polished');
+
+        // If the week is totally in the past and failed the goal, solidify it
+        const todayStr = Formatter.dateLogical();
+        const closed = sl._dailyList[sl._dailyList.length - 1].date < todayStr;
+        const solid = closed && !goal;
+        if (solid) tr.classList.add('track-solidified');
+
+        if (calendarState.selectedLabel === sl.label) tr.classList.add('is-viewing');
+        tr.onclick = (e) => { e.stopPropagation(); openHistory(sl, sl.label); };
+        tr.setAttribute('data-tooltip-html', generateRichTooltip(sl));
+
+        let ls = null;
+        segs.forEach(s => {
+            // Only draw segments that survived the overflow displacement
+            if (s.v > 0) {
+                const w = (s.v / GAME.WEEKLY_GOAL) * 100;
+                const d = document.createElement('div');
+                ls = d;
+                d.className = `bbgl-seg ${goal ? 'seg-polished' : 'seg-brushed'}-${s.t}`;
+                d.style.width = w + '%';
+                tr.appendChild(d);
+            }
+        });
+
+        if (ls && !goal && !solid) ls.classList.add('seg-rounded-end');
+
+        const pct = Math.min(100, Math.floor((tot / GAME.WEEKLY_GOAL) * 100));
+        const lb = document.createElement('div'); lb.className = 'bbgl-track-label'; lb.innerHTML = `${pct}%`;
+        tr.appendChild(lb); anchor.appendChild(tr); cont.appendChild(anchor);
+
+        if (viewState.activeViewLabel === sl.label && calendarState.selectedLabel !== sl.label) openHistory(sl, sl.label);
+    }
+    function renderStats(sl, rawLbl) {
+        const c = dom.ledgerView; if (!c) return; if (!sl.stats) sl = DataController._hydrate(sl, [], rawLbl, 'DAY'); const s = sl.stats, isP = sl.resolution !== 'DAY';
+        const dEl = dom.dateLabel;
+        if (dEl) {
+            const isExp = dom.panel.classList.contains('bbgl-expanded');
+
+            // Standard: "Mar 6, 2026" | Expanded: "March 6, 2026"
+            let l = isExp ? Formatter.dateFull(sl.label) : Formatter.datePretty(sl.label);
+            if (!l) l = sl.label; // Fallback for things like "Week 10" or "All-Time"
+
+            if (sl.resolution === 'MONTH') {
+                l = sl.label + ' ' + calendarState.year;
+            } else if (isExp && isP && sl._dailyList.length > 0 && sl.resolution !== 'ALL') {
+                const endLabel = Formatter.dateMonthDay(sl._dailyList[sl._dailyList.length - 1].date);
+                l += ` (${Formatter.dateMonthDay(sl._dailyList[0].date)} - ${endLabel})`;
+            }
+            dEl.innerText = l;
+        }
+        const sumEl = dom.summaryLabel; if (sumEl) sumEl.innerHTML = `Total E: ${Formatter.dual(s.total.cost)} <span style="opacity:0.3; margin:0 6px">|</span> Total Gains: ${Formatter.dual(s.total.gain)}`;
+        const lm = { 'STR': 'Strength', 'DEF': 'Defense', 'SPD': 'Speed', 'DEX': 'Dexterity', 'TOT': 'Total' };
+        runtime.currentStats = { sl, s };
+        const todayStr = Formatter.dateLogical();
+        const slLastDate = sl._dailyList && sl._dailyList.length > 0 ? sl._dailyList[sl._dailyList.length - 1].date : sl.date;
+        const isCurrentPeriod = sl.resolution === 'ALL' || slLastDate >= todayStr;
+        const col = (lc, k, cl) => {
+            const d = s[k], ft = lm[lc] || lc; let rh = '', rt = '';
+            const fmtR = (n) => { if (!n && n !== 0) return '0'; const a = Math.abs(n); if (a >= 1e15) return (n / 1e15).toFixed(4) + 'q'; if (a >= 1e12) return (n / 1e12).toFixed(4) + 't'; if (a >= 1e9) return (n / 1e9).toFixed(4) + 'b'; if (a >= 100) return Math.round(n).toLocaleString('en-US'); return n.toFixed(1); };
+            const mkTip = (r1, r2, pct, sg) => `<div style='text-align:center;line-height:1.6'><div style='margin-bottom:0px'>Growth Rate</div><div style='font-size:0.85em;opacity:0.35;margin-bottom:3px'>(Gains/150E)</div><div>${fmtR(r1)} \u2192 ${fmtR(r2)}</div><div style='font-size:0.85em;color:#aaa'>${sg}${Math.round(pct)}%</div></div>`;
+            if (isP && k !== 'total') {
+                let th = `<span style="opacity:0.3">--</span>`;
+                if (userConfig.ratesEnabled && sl._dailyList.length > 1) { const r1 = DataController._hydrate(sl._dailyList[0], [], '', 'DAY').stats[k].rate, r2 = DataController._hydrate(sl._dailyList[sl._dailyList.length - 1], [], '', 'DAY').stats[k].rate, del = r2 - r1, sg = del >= 0 ? '+' : '', pct = r1 > 0 ? ((r2 - r1) / r1) * 100 : 0; th = `<div style="display:flex;flex-direction:column;align-items:center;line-height:1.1"><span>${sg}${Math.round(del)}</span><span class="view-exp" style="font-size:0.8em;opacity:0.7">(${sg}${Math.round(pct)}%)</span></div>`; rt = mkTip(r1, r2, pct, sg); } rh = userConfig.ratesEnabled ? th : '';
+            } else { if (userConfig.ratesEnabled && k !== 'total') { const _pd = new Date(sl.date + 'T00:00:00Z'); _pd.setUTCDate(_pd.getUTCDate() - 1); const r1 = DataController.getHistoricalRate(_pd.toISOString().slice(0, 10), k), r2 = d.rate, del = r2 - r1, sg = del >= 0 ? '+' : '', pct = r1 > 0 ? (del / r1) * 100 : 0; rh = userConfig.ratesEnabled ? Formatter.dual(d.rate, true) : ''; rt = mkTip(r1, r2, pct, sg); } else { rh = userConfig.ratesEnabled ? Formatter.dual(d.rate, true) : ''; rt = `Growth Rate (Gains / 150E)`; } }
+            return `<div class="stat-column"><div class="col-header cell-stack"><div class="l-top c-label ${cl}"><span class="view-std">${lc}</span><span class="view-exp">${ft}</span></div><div class="l-bot" data-tooltip="${isP ? `Energy Used on ${ft}` : `Energy Used`}">${Formatter.dual(d.cost)} E</div></div><div class="col-data-block cell-stack c-gain"><div class="l-top" data-tooltip="${ft} Gained">+${Formatter.dual(d.gain)}</div><div class="l-bot" data-tooltip="${rt}">${rh}</div></div><div class="col-data-block cell-stack c-total"><div class="l-top" data-tooltip="${isCurrentPeriod ? 'Current' : 'Ending'} ${ft}">${Formatter.dual(d.end)}</div><div class="l-bot" data-tooltip="Starting ${ft}">${Formatter.dual(d.start)}</div></div></div>`;
+        };
+        c.innerHTML = ` ${col('STR', 'str', 't-str')} ${col('DEF', 'def', 't-def')} ${col('SPD', 'spd', 't-spd')} ${col('DEX', 'dex', 't-dex')} `;
+    }
+    function generateRichTooltip(sl) {
+        const f = Formatter.abbr, fg = (n) => (n > 0 ? '+' : '') + f(n), s = sl.stats, lbl = Formatter.datePretty(sl.label || sl.date);
+        let h = `<div class="tt-header">${lbl}</div><div class="tt-energy" style="margin-bottom:6px; padding-bottom:4px; border-bottom:1px solid #555;">Energy: ${Formatter.number(s.total.cost)}</div><div style="display:grid; grid-template-columns: 28px 1fr 1fr 1fr; column-gap:10px; row-gap:2px; font-family:'Arial', sans-serif; font-size:11px;">`;
+        const hs = "color:#666; font-size:9px; text-align:right; margin-bottom:2px;"; h += `<div style="grid-column:2; ${hs}">Start</div><div style="grid-column:3; ${hs}">Gain</div><div style="grid-column:4; ${hs}">End</div>`;
+        const r = (n, c, o, t = false) => { const st = t ? "border-top:1px solid #444; padding-top:4px; margin-top:2px;" : ""; return `<div style="color:${c}; font-weight:700; ${st}">${n}</div><div style="text-align:right; color:#888; ${st}">${f(o.start)}</div><div style="text-align:right; color:${CONSTANTS.COLORS.GAINS}; font-weight:700; ${st}">${fg(o.gain)}</div><div style="text-align:right; color:#fff; font-weight:700; ${st}">${f(o.end)}</div>`; };
+        h += r('STR', CONSTANTS.COLORS.STR, s.str) + r('DEF', CONSTANTS.COLORS.DEF, s.def) + r('SPD', CONSTANTS.COLORS.SPD, s.spd) + r('DEX', CONSTANTS.COLORS.DEX, s.dex) + r('TOT', CONSTANTS.COLORS.TOT, s.total, true); return h + `</div>`;
+    }
+    function handleDomMutation() {
+        const loc = userConfig.buttonLocation;
+        const showFooter = loc === 'notes' || loc === 'both';
+        const showSidebar = loc === 'sidebar' || loc === 'both';
+        // Footer tab
+        const nb = document.getElementById('notes_panel_button'), mb = document.getElementById('bbgl-gym-tab');
+        if (showFooter && nb && !mb) { const b = document.createElement('button'); b.id = 'bbgl-gym-tab'; b.innerHTML = ICONS.LOGO; b.type = 'button'; b.title = 'Big Black Gym Log'; nb.parentNode.insertBefore(b, nb); dom.gymTab = b; }
+        else if (!showFooter && mb) { mb.remove(); dom.gymTab = null; }
+        // Sidebar buttons
+        const dt = document.querySelector(SB_DESKTOP.target), mt = document.querySelector(SB_MOBILE.target);
+        if (showSidebar) { if (dt && !document.getElementById(SB_DESKTOP.id)) injectSidebarButton(SB_DESKTOP, false); if (mt && !document.getElementById(SB_MOBILE.id)) injectSidebarButton(SB_MOBILE, true); }
+        else { const dEl = document.getElementById(SB_DESKTOP.id), mEl = document.getElementById(SB_MOBILE.id); if (dEl) dEl.closest('.swiper-slide') ? dEl.closest('.swiper-slide').remove() : dEl.remove(); if (mEl) mEl.closest('.swiper-slide') ? mEl.closest('.swiper-slide').remove() : mEl.remove(); }
+    }
+    const SB_DESKTOP = { target: '.area-desktop___bpqAS[id="nav-gym"]', container: 'area-desktop___bpqAS', link: 'desktopLink___SG2RU', row: 'area-row___iBD8N', id: 'nav-gym-log-desktop' };
+    const SB_MOBILE = { target: '.area-mobile___BH0Ku[id="nav-gym"]', container: 'area-mobile___BH0Ku', link: 'mobileLink___xTgRa sidebarMobileLink', row: 'area-row___iBD8N', slide: 'swiper-slide slide___se7hj', id: 'nav-gym-log-mobile' };
+    const GYM_LOG_ICON = `<svg xmlns="http://www.w3.org/2000/svg" stroke="transparent" stroke-width="0" width="18" height="18" viewBox="0 0 512 512"><path d="${ICONS.LOGO_PATH}"></path></svg>`;
+    function syncSidebarState() {
+        const a = window.location.hash.includes('gymlog'), ids = [SB_DESKTOP.id, SB_MOBILE.id];
+        if (a) { ids.forEach(id => { const c = document.getElementById(id); if (c) { c.classList.add('active___vFLyM'); const i = c.querySelector('.defaultIcon___iiNis'); if (i) i.classList.add('active___b87hf'); } }); document.querySelectorAll('.active___vFLyM').forEach(el => { if (!ids.includes(el.id)) el.classList.remove('active___vFLyM'); }); document.querySelectorAll('.active___b87hf').forEach(el => { const p = el.closest('.area-desktop___bpqAS, .area-mobile___BH0Ku'); if (p && !ids.includes(p.id)) el.classList.remove('active___b87hf'); }); } else { ids.forEach(id => { const c = document.getElementById(id); if (c) { c.classList.remove('active___vFLyM'); const i = c.querySelector('.defaultIcon___iiNis'); if (i) i.classList.remove('active___b87hf'); } }); }
+    }
+    function getTopCeiling() {
+        let ceiling = 50;
+        if (window.innerWidth >= 1000 || window.scrollY > 10) return ceiling;
+        for (const el of document.body.children) {
+            if (el.id && el.id.startsWith('bbgl-')) continue;
+            const style = window.getComputedStyle(el);
+            if (style.position === 'fixed') {
+                const rect = el.getBoundingClientRect();
+                if (rect.top < 10 && rect.bottom > ceiling) ceiling = Math.ceil(rect.bottom);
+            }
+        }
+        return ceiling;
+    }
+    function handleLayout() {
+        const p = dom.panel, tb = dom.gymTab, isPanelOpen = viewState.isOpen && p && p.style.display !== 'none';
+        if (tb) { if (isPanelOpen) tb.classList.add('bbgl-tab-active'); else tb.classList.remove('bbgl-tab-active'); }
+        if (!p || p.classList.contains('bbgl-mode-page')) return;
+        p.style.setProperty('max-height', `calc(100vh - ${getTopCeiling()}px)`, 'important');
+        let off = LAYOUT.BASE_RIGHT; const peopBtn = document.getElementById('people_panel_button'), settBtn = document.getElementById('notes_settings_button'), noteBtn = document.getElementById('notes_panel_button');
+        if (peopBtn && Array.from(peopBtn.classList).some(c => c.includes('opened___'))) off += 303; if (settBtn && Array.from(settBtn.classList).some(c => c.includes('opened___'))) off += 303;
+        if (noteBtn && Array.from(noteBtn.classList).some(c => c.includes('opened___'))) { let isNotesExpanded = false; document.querySelectorAll('[class*="visible___"]').forEach(w => { if (w.id !== 'bbgl-panel' && !w.closest('[class*="root___cYD0i"]') && !w.className.includes('chat') && (w.offsetWidth > 500 || (window.innerWidth <= 620 && w.offsetWidth > window.innerWidth * 0.75))) { const r = w.getBoundingClientRect(); if (r.right >= window.innerWidth - 20) isNotesExpanded = true; } }); off += isNotesExpanded ? 582 : 303; }
+        if (window.innerWidth - off < 40) { p.style.right = `${window.innerWidth + 50}px`; p.style.opacity = '0'; p.style.pointerEvents = 'none'; } else { const panelWidth = viewState.expanded ? 576 : 300; if (off <= LAYOUT.BASE_RIGHT) { const maxOff = window.innerWidth - panelWidth - 0; if (off > maxOff) off = Math.max(0, maxOff); } p.style.right = `${off}px`; p.style.opacity = '1'; p.style.pointerEvents = 'auto'; }
+        const wins = document.querySelectorAll('[class*="visible___"][class*="root___"]'), totalShift = viewState.expanded ? 581 : 305;
+        const isMobileExpanded = window.innerWidth <= 620 && viewState.expanded;
+        if (wins.length > 0) wins.forEach(w => { if (w.id === 'bbgl-panel') return; const rect = w.getBoundingClientRect(); const dist = window.innerWidth - rect.right; const isRightSidePanel = !!w.closest('[class*="root___"]') && dist < off - 50; if (isRightSidePanel) { w.style.transform = ''; return; } w.style.transform = isPanelOpen ? `translateX(-${totalShift}px)` : ''; w.style.transition = 'transform 0.2s ease-out'; });
+    }
+    function injectSidebarButton(cfg, mob) {
+        if (document.getElementById(cfg.id)) return; const c = document.createElement('div'); c.className = cfg.container; c.id = cfg.id; const r = document.createElement('div'); r.className = cfg.row; const l = document.createElement('a'); l.href = '#gymlog'; l.className = cfg.link;
+        l.innerHTML = `<span class="svgIconWrap___AMIqR"><span class="defaultIcon___iiNis mobile___paLva">${GYM_LOG_ICON}</span></span>${mob ? '<span>Gym Log</span>' : '<span class="linkName___FoKha">Gym Log</span>'}`;
+        // Show the purple new-install notification on the sidebar button only (not the footer tab),
+        // and only on first install (before bbgl_initialized is set and before they've dismissed it).
+        const _isNewInstall = !localStorage.getItem('bbgl_initialized') && !localStorage.getItem(KEYS.SB_NOTIF);
+        if (_isNewInstall) c.classList.add('bbgl-sb-notif');
+        l.addEventListener('click', (e) => {
+            e.preventDefault();
+            // Dismiss the purple notification on first interaction with our sidebar button.
+            if (c.classList.contains('bbgl-sb-notif')) {
+                c.classList.remove('bbgl-sb-notif');
+                localStorage.setItem(KEYS.SB_NOTIF, '1');
+            }
+            if (window.location.hash !== '#gymlog') { history.pushState(null, null, '#gymlog'); checkViewRouting(); }
+        }); r.appendChild(l); c.appendChild(r);
+        document.querySelectorAll(cfg.target).forEach(n => { const p = n.closest('.swiper-slide'); if (mob && p) { const s = document.createElement('div'); s.className = cfg.slide; s.style.width = n.parentNode.style.width || '43.375px'; s.appendChild(c); if (n.parentNode.parentNode) n.parentNode.parentNode.insertBefore(s, n.parentNode.nextSibling); } else if (!mob && !p) { n.parentNode.insertBefore(c, n.nextSibling); } }); syncSidebarState();
+    }
+    function generateDayStartSelect(id, selectedVal = 'utc') {
+        return `<select id="${id}" class="bbgl-native-select"><option value="utc"${selectedVal === 'utc' ? ' selected' : ''}>Torn Time (UTC)</option><option value="local"${selectedVal === 'local' ? ' selected' : ''}>Local Time</option></select>`;
+    }
+
+    // ========================================================================
+    // HTML BUILDER HELPERS (Step 1)
+    // ========================================================================
+
+    function buildSection(title, bodyHTML, bodyStyle = '') {
+        const style = bodyStyle ? ` style="${bodyStyle}"` : '';
+        return `<div class="bbgl-prefs-tab-title">${title}</div><div class="bbgl-settings-body"${style}>${bodyHTML}</div>`;
+    }
+
+    function buildRow(labelHTML, controlHTML) {
+        return `<div class="bbgl-setting-row">${labelHTML}${controlHTML}</div>`;
+    }
+
+    function buildToggle(id, labelHTML) {
+        return buildRow(labelHTML, `<label class="bbgl-switch"><input type="checkbox" id="${id}"><span class="slider"></span></label>`);
+    }
+
+    function buildButton(id, label, modifier = '', extraStyle = '') {
+        const cls = ['torn-btn', modifier ? `torn-btn-${modifier}` : ''].filter(Boolean).join(' ');
+        const style = extraStyle ? ` style="${extraStyle}"` : '';
+        return `<button id="${id}" class="${cls}"${style}>${label}</button>`;
+    }
+
+    function buildApiEntryField(prefix, extraStyle = '') {
+        const style = extraStyle ? ` style="${extraStyle}"` : '';
+        return `<div class="bbgl-api-container"${style}><div id="${prefix}-api-paste" class="bbgl-paste-icon" data-tooltip="${TOOLTIPS.PASTE_CLIPBOARD}">${ICONS.PASTE}</div><input id="${prefix}-api-key" type="text" name="bbgl_api_key" autocomplete="off" class="bbgl-native-input" placeholder="Enter Full or Custom API Key..."></div>`;
+    }
+
+    // ========================================================================
+    // SHARED TOOLTIPS + ONCHANGE HELPERS (welcome + settings parity)
+    // ========================================================================
+
+    const TOOLTIPS = {
+        ANIM: "<b>Toggle UI transitions and cosmetic effects</b><br><i>Disable to prioritize performance on slower devices.</i>",
+        RATES: "<b>Display growth rate and efficiency metrics</b><br><i>Turn off for a minimalist view focused strictly on totals.</i>",
+        LOC: "<b>Choose where the Gym Log icon appears in your Torn UI</b><br><i>Select Sidebar if the Footer Tab is hidden or if you are using Chat 2.0.</i>",
+        DAY_START: "<b>Anchor logs to UTC or your system clock</b><br><i>Syncs your ongoing training sessions with your real-world schedule.</i>",
+        WEEK_START: "<b>Change your preferred starting day for the week</b><br><i>Adjusts the calendar layout and weekly performance metrics.</i>",
+        API: "Custom API key required.<br><br><i>This script strictly requests 'battlestats' and 'log' data. Click the Create API Key button below to securely generate a key for this script. For maximum safety, you can edit this newly created key in your Torn API Settings to restrict its log access specifically to the 'Gym' category.<br><br>Your key is stored locally on your device only and is sent exclusively to api.torn.com.</i>",
+        PASTE_CLIPBOARD: "Paste from Clipboard",
+        AGREE_GATE: "Check every box in the user acknowledgement",
+        LOCKED: "Locked",
+        LEDGER_VIEW: "Ledger",
+        GRAPH_VIEW: "Graph",
+        STICKERBOOK: "Stickerbook",
+        ACHIEVEMENTS: "Achievements",
+        COPY_SESSION: "Copy Session Data",
+        ALL_TIME_SUMMARY: "All-Time Summary",
+        YEARLY_SUMMARY: "Yearly Summary",
+        MONTHLY_SUMMARY: "Monthly Summary",
+        DEMO_EXIT: "Exit Demo Mode",
+        DEMO_EXIT_HTML: "Exit Demo Mode<i>Stats shown here are for previewing the functions of the script only — they do not reflect realistic Torn growth.</i>",
+        REFRESH_COOLDOWN: (remaining) => `Please wait ${remaining}s before refreshing the log again`,
+        CELL_DATE: (ds) => `Date: ${ds}`
+    };
+
+    function syncSiblingSelect(primaryId, siblingId, val) {
+        if (!dom.panel) return;
+        const sib = dom.panel.querySelector('#' + siblingId);
+        if (sib && sib.value !== val) sib.value = val;
+    }
+
+    function onChangeLoc(val) {
+        userConfig.buttonLocation = val; saveConfig(); handleDomMutation();
+        syncSiblingSelect('set-loc-select', 'init-loc-select', val);
+        syncSiblingSelect('init-loc-select', 'set-loc-select', val);
+    }
+
+    function resetSelectionState() {
+        calendarState.selectedData = null;
+        calendarState.selectedLabel = null;
+        viewState.activeViewLabel = null;
+        runtime.stickerData = [];
+    }
+
+    function onChangeDayStart(val) {
+        userConfig.dayStartMode = val; saveConfig();
+        const s = getActiveHistory();
+        const baseline = s.meta.baselineBreakdown || ZERO_BREAKDOWN;
+        const series = DataController.flattenAllSeries();
+        if (series.length > 0) {
+            const rebuilt = DataController._rebuildFromSeries(series, baseline);
+            s.history = rebuilt.history; s.today = rebuilt.today;
+            DataController.saveSmartHistory(s);
+        } else {
+            DataController.invalidate();
+        }
+        resetSelectionState();
+        renderPanelContent();
+        const tp = dom.topPanel; if (tp && tp.classList.contains('viewing-graph')) GraphController.draw();
+        syncSiblingSelect('set-day-start', 'init-day-start', val);
+        syncSiblingSelect('init-day-start', 'set-day-start', val);
+    }
+
+    function onChangeWeekStart(val) {
+        userConfig.weekStartMode = val; saveConfig(); DataController.invalidate();
+        resetSelectionState();
+        const wr = dom.panel && dom.panel.querySelector('.bbgl-week-row');
+        if (wr) {
+            const wd = userConfig.weekStartMode === 'mon' ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            wr.innerHTML = wd.map(d => `<span>${d}</span>`).join('');
+        }
+        renderPanelContent();
+        const tp = dom.topPanel; if (tp && tp.classList.contains('viewing-graph')) GraphController.draw();
+        syncSiblingSelect('set-week-start', 'init-week-start', val);
+        syncSiblingSelect('init-week-start', 'set-week-start', val);
+    }
+
+    // ========================================================================
+    // PRIVACY DISCLOSURE MODAL
+    // ========================================================================
+
+    const PRIVACY_TEXT = {
+        DISCLOSURE: `<strong>What API Key is Needed?</strong><p>Since the Torn API lacks a direct endpoint for training energy (E), this script requires an API key with log and battlestats access to read your training records. This is the only way to accurately calculate your energy spent. Without this level of access, the script&rsquo;s core mechanics would not be possible.</p><strong>How Your Data Is Handled</strong><p>When accessing logs, this script only retrieves the specific training data for each stat &mdash; no other logs are read. All data retrieved from your API key is <strong>processed locally within your browser</strong>. This script <strong>does not transmit, store, or share your data externally</strong> in any way. I, as the developer, do not have access to your logs, API data, or any information generated by your use of this script.</p><strong>Transparency &amp; Verification</strong><p>For full transparency, you can verify how your data is handled by reviewing the script's source code. Specifically, you can search for the section labeled "Data Storage," which clearly shows how and where data is processed. This allows you to independently confirm that all data remains on your device.</p>`,
+        ACK_INTRO: `<div style="padding:0 0 8px 0; color:#bbb; font-size:12px;">By using this script, you acknowledge and agree to the following:</div>`,
+        ACK_ITEMS: [
+            "I understand that this script requires full log access solely due to limitations in Torn's API.",
+            "I understand that all data is processed and stored locally within my own browser.",
+            "I understand that no data is transmitted, stored externally, or accessible to the developer.",
+            "I understand that I can verify these claims by reviewing the script's code, specifically the \"Data Storage\" section."
+        ]
+    };
+
+    function buildPrivacyModalHTML(reviewMode) {
+        const ackRows = PRIVACY_TEXT.ACK_ITEMS.map((txt, i) => {
+            const ctrl = reviewMode
+                ? `<span class="bbgl-ack-check">${ICONS.CHECK}</span>`
+                : `<input type="checkbox" id="bbgl-ack-${i + 1}">`;
+            const label = reviewMode
+                ? `<span>${txt}</span>`
+                : `<label for="bbgl-ack-${i + 1}">${txt}</label>`;
+            return `<div class="bbgl-ack-row">${ctrl}${label}</div>`;
+        }).join('');
+        const discSection = buildSection('Privacy Disclosure', `<div class="bbgl-modal-scrollbox">${PRIVACY_TEXT.DISCLOSURE}</div>`, 'margin-bottom:5px;');
+        const ackSection = buildSection('User Acknowledgement', `<div class="bbgl-modal-scrollbox">${PRIVACY_TEXT.ACK_INTRO}${ackRows}</div>`, 'margin-bottom:8px;');
+        const footer = reviewMode ? '' : `<div style="display:flex; gap:8px; margin:0 10px 4px 10px;">${buildButton('bbgl-privacy-demo-btn', 'DEMO', 'purple')}<span class="bbgl-agree-wrap" data-tooltip="${TOOLTIPS.AGREE_GATE}">${buildButton('bbgl-privacy-agree-btn', 'AGREE', 'green', '')}</span></div>`;
+        return `<div class="bbgl-modal-overlay" id="bbgl-privacy-modal"><div class="bbgl-modal-window"><div class="close-settings-btn bbgl-close-x" id="bbgl-privacy-close" title="Close">${ICONS.CLOSE}</div>${discSection}${ackSection}${footer}</div></div>`;
+    }
+
+    function closePrivacyModal() {
+        const m = document.getElementById('bbgl-privacy-modal');
+        if (m && m.parentNode) m.parentNode.removeChild(m);
+    }
+
+    function openPrivacyModal() {
+        closePrivacyModal();
+        const reviewMode = !!userConfig.privacyAgreed;
+        const host = document.body;
+        host.insertAdjacentHTML('beforeend', buildPrivacyModalHTML(reviewMode));
+        const modal = document.getElementById('bbgl-privacy-modal');
+        if (!modal) return;
+        modal.querySelector('#bbgl-privacy-close').onclick = () => closePrivacyModal();
+        modal.onclick = (e) => { if (e.target === modal) closePrivacyModal(); };
+        if (reviewMode) return; // Review mode: only close is wired
+        const agreeBtn = modal.querySelector('#bbgl-privacy-agree-btn');
+        const agreeWrap = modal.querySelector('.bbgl-agree-wrap');
+        const boxes = Array.from(modal.querySelectorAll('.bbgl-ack-row input[type="checkbox"]'));
+        // Start disabled.
+        agreeBtn.classList.add('bbgl-btn-disabled');
+        const refreshAgreeState = () => {
+            const all = boxes.every(b => b.checked);
+            if (all) {
+                agreeBtn.classList.remove('bbgl-btn-disabled');
+                if (agreeWrap) agreeWrap.removeAttribute('data-tooltip');
+            } else {
+                agreeBtn.classList.add('bbgl-btn-disabled');
+                if (agreeWrap) agreeWrap.setAttribute('data-tooltip', TOOLTIPS.AGREE_GATE);
+            }
+        };
+        boxes.forEach(b => b.onchange = refreshAgreeState);
+        refreshAgreeState();
+        modal.querySelector('#bbgl-privacy-demo-btn').onclick = function () {
+            this.blur();
+            enterDemo('privacy');
+            closePrivacyModal();
+        };
+        agreeBtn.onclick = function () {
+            if (agreeBtn.classList.contains('bbgl-btn-disabled')) return;
+            this.blur();
+            userConfig.privacyAgreed = new Date().toISOString();
+            saveConfig();
+            closePrivacyModal();
+            refreshInitLock();
+            const wv = dom.welcomeView;
+            if (wv && wv.classList.contains('active-view')) refreshInitMask(wv);
+        };
+    }
+
+    function refreshInitMask(wv) {
+        const root = wv || dom.welcomeView;
+        if (!root) return;
+        const body = root.querySelector('#init-section-masked-body');
+        if (!body) return;
+        if (userConfig.privacyAgreed) body.classList.remove('bbgl-mask-active');
+        else body.classList.add('bbgl-mask-active');
+        refreshInitLock();
+    }
+
+    function refreshInitLock() {
+        if (!dom.panel) return;
+        const isInit = !!localStorage.getItem('bbgl_initialized');
+        const lock = !isInit && !runtime.demoMode;
+        dom.panel.classList.toggle('bbgl-init-locked', lock);
+        const pc = document.getElementById('bbgl-page-container');
+        if (pc) pc.classList.toggle('bbgl-init-locked', lock);
+    }
+
+    function refreshDemoMasks() {
+        if (!dom.settingsView) return;
+        dom.settingsView.querySelectorAll('.bbgl-demo-maskable').forEach(el => {
+            el.classList.toggle('bbgl-mask-active', !!runtime.demoMode);
+        });
+    }
+
+    function enterDemo(source) {
+        runtime.demoEnteredFrom = source;
+        localStorage.setItem(KEYS.DEMO, '1');
+        runtime.demoMode = true;
+        runtime.demoHistory = null;
+        runtime.stickerData = [];
+        _historyCache = null;
+        DataController.invalidate();
+        calendarState.selectedData = null;
+        calendarState.selectedLabel = Formatter.dateLogical();
+        viewState.activeViewLabel = null;
+        const deb = dom.panel ? dom.panel.querySelector('#bbgl-demo-exit') : null;
+        if (deb) deb.style.display = 'flex';
+        const debBtn = dom.panel ? dom.panel.querySelector('#bbgl-demo-exit-btn') : null;
+        if (debBtn) debBtn.style.display = 'inline-flex';
+        refreshInitLock();
+        refreshDemoMasks();
+        switchView('ledger');
+    }
+    function enterDemoFromSettings() { enterDemo('settings'); }
+
+    // ========================================================================
+    // WELCOME PAGE BUILDERS (Step 2)
+    // ========================================================================
+
+
+    function buildWelcomeIntroSection() {
+        const body = `<div class="bbgl-author-block"><strong>By <a href="https://www.torn.com/profiles.php?XID=3550896" target="_blank" style="color:#69f0ae; text-decoration:none; border-bottom:1px dotted rgba(105,240,174,0.4); transition:border-color .2s;" onmouseover="this.style.borderBottomColor='#69f0ae'" onmouseout="this.style.borderBottomColor='rgba(105,240,174,0.4)'">BigBlackHawk</a></strong>When it comes to your stats, size matters! So stop guessing and start measuring. Prove to everyone you&rsquo;re a grower and not just a show-er.<br><br>Big Black Gym Log brings high-fidelity graphs and detailed logs to your training routine. Earn fun incentives, track your gains with high precision, and experience a tracking suite built to integrate seamlessly with Torn&rsquo;s native UI.</div><div class="bbgl-author-block" style="margin-top:0;">Please read the privacy disclosure or import an existing log below before continuing.</div>${buildButton('init-privacy-btn', 'PRIVACY DISCLOSURE', '', 'margin:0 10px 8px 10px; width: calc(100% - 20px); display:block;')}`;
+        return `<div class="bbgl-prefs-tab-title" style="border-radius:5px 5px 0 0; margin-top:0;">Welcome to Big Black Gym Log</div><div class="bbgl-settings-body" style="margin-bottom:5px;">${body}</div>`;
+    }
+
+    function buildWelcomeInitSection() {
+        const inputHTML = buildApiEntryField('init', 'margin:8px 10px;');
+        const createBtn = buildButton('init-create-api-btn', 'CREATE API KEY', '', 'margin:0 10px 8px 10px; width: calc(100% - 20px); display:block;');
+        const rows =
+            buildRow(`<span data-tooltip-html="${TOOLTIPS.LOC}">Log Access</span>`,
+                `<select id="init-loc-select" class="bbgl-native-select"><option value="notes">Footer Tab</option><option value="sidebar">Sidebar</option><option value="both">Both</option></select>`) +
+            buildRow(`<span data-tooltip-html="${TOOLTIPS.DAY_START}">Log Timezone</span>`, generateDayStartSelect('init-day-start', userConfig.dayStartMode)) +
+            buildRow(`<span data-tooltip-html="${TOOLTIPS.WEEK_START}">Week Start</span>`,
+                `<select id="init-week-start" class="bbgl-native-select"><option value="sun">Sun &ndash; Sat</option><option value="mon">Mon &ndash; Sun</option></select>`);
+        const startBtn = buildButton('init-start-btn', 'START TRACKING', 'green', 'margin:8px 10px; width: calc(100% - 20px); display:block;');
+        const body = `<div id="init-section-masked-body" class="bbgl-mask-host" data-mask-text="Please agree to the privacy disclosure first.">${inputHTML}${createBtn}${rows}${startBtn}</div>`;
+        return buildSection('Initialization Settings', body, 'margin-bottom:5px;');
+    }
+
+    function buildWelcomeReturningSection() {
+        const note = `<div class="bbgl-author-block"><strong>Welcome back!</strong> Reinstalling or setting up on a new device? Skip the setup by importing your existing log below. BBGL is built for seamless cross-device tracking, and your progress will resume automatically if your saved API is still active.</div>`;
+        const importBtn = buildButton('init-returning-import-btn', 'IMPORT LOG', '', 'margin:0 10px 8px 10px; width: calc(100% - 20px); display:block;');
+        const hiddenFile = `<input type="file" id="init-import-file" accept=".json,application/json" style="display:none">`;
+        return buildSection('Returning User', note + importBtn + hiddenFile, 'margin-bottom:5px;');
+    }
+
+    function getWelcomeHTML() {
+        const isInit = !!localStorage.getItem('bbgl_initialized') || runtime.demoMode;
+        const closeBtn = isInit
+            ? `<div class="close-settings-btn bbgl-close-x" title="Close">${ICONS.CLOSE}</div>`
+            : '';
+        return `${closeBtn}<div class="bbgl-settings-scroll-area">${buildWelcomeIntroSection()}${buildWelcomeInitSection()}${buildWelcomeReturningSection()}</div>`;
+    }
+
+    // ========================================================================
+    // SETTINGS PANEL BUILDERS (Step 3)
+    // ========================================================================
+
+    function buildSettingsInterfaceSection() {
+        return buildSection('Interface Settings',
+            buildToggle('set-anim-toggle', `<span data-tooltip-html="${TOOLTIPS.ANIM}">Animations</span>`) +
+            buildToggle('set-rate-toggle', `<span data-tooltip-html="${TOOLTIPS.RATES}">Rate Displays</span>`) +
+            buildRow(
+                `<span data-tooltip-html="${TOOLTIPS.LOC}">Log Access</span>`,
+                `<select id="set-loc-select" class="bbgl-native-select"><option value="notes">Footer Tab</option><option value="sidebar">Sidebar</option><option value="both">Both</option></select>`
+            ) +
+            buildRow(`<span data-tooltip-html="${TOOLTIPS.DAY_START}">Log Timezone</span>`, generateDayStartSelect('set-day-start', userConfig.dayStartMode)) +
+            buildRow(`<span data-tooltip-html="${TOOLTIPS.WEEK_START}">Week Start</span>`, `<select id="set-week-start" class="bbgl-native-select"><option value="sun">Sun – Sat</option><option value="mon">Mon – Sun</option></select>`)
+        );
+    }
+
+    function buildSettingsApiSection() {
+        const inputHTML = buildApiEntryField('set');
+        const topBtn = buildButton('create-api-btn', 'CREATE API KEY', '', 'margin: 0 10px 0 10px; width: calc(100% - 20px); display: block; border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: none;');
+        const buttons = `<div class="bbgl-btn-grid bbgl-api-grid" style="margin: 0 10px 10px 10px!important;">${buildButton('clear-api-btn', 'CLEAR API KEY', 'red', 'border-top-left-radius: 0!important;')}${buildButton('updt-settings-btn', 'REGISTER API KEY', 'green', 'border-top-right-radius: 0!important;')}</div>`;
+        return buildSection('API Access', `<div class="bbgl-mask-host bbgl-demo-maskable" data-mask-text="Not available in demo mode">${inputHTML}${topBtn}${buttons}</div>`, 'margin-bottom: 5px;');
+    }
+
+    function buildSettingsDataSection() {
+        const inner =
+            buildButton('refresh-log-btn', 'REFRESH LOG', '', 'margin: 8px 10px 8px 10px; width: calc(100% - 20px); display: block;') +
+            `<div class="bbgl-btn-grid" style="margin: 0 10px 0 10px;">${buildButton('export-btn', 'EXPORT LOG', '', 'border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: none;')}${buildButton('import-btn', 'IMPORT LOG', '', 'border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: none;')}<input type="file" id="import-file" accept=".json,application/json" style="display:none"></div>` +
+            buildButton('clear-btn', 'CLEAR LOG', 'red', 'margin: 0 10px 8px 10px; width: calc(100% - 20px); display: block; border-top-left-radius: 0; border-top-right-radius: 0;');
+        return buildSection('Data Management', `<div class="bbgl-mask-host bbgl-demo-maskable" data-mask-text="Not available in demo mode">${inner}</div>`);
+    }
+
+    function buildSettingsInfoSection() {
+        const stack = `<div style="margin: 8px 10px; display: flex; flex-direction: column;">` +
+            buildButton('show-welcome-btn', 'SHOW WELCOME PAGE', '', 'border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: none; width: 100%;') +
+            buildButton('settings-privacy-btn', 'PRIVACY DISCLOSURE', '', 'border-radius: 0; border-bottom: none; width: 100%;') +
+            buildButton('settings-demo-btn', 'DEMO', 'purple', 'border-radius: 0; border-bottom: none; width: 100%;') +
+            buildButton('dev-reset-btn', 'DEV: FACTORY RESET', 'red', `border-top-left-radius: 0; border-top-right-radius: 0; width: 100%; opacity: 0.6; display: ${runtime.devMode ? 'block' : 'none'};`) +
+            `</div>`;
+        return buildSection('Miscellaneous', `<div class="bbgl-mask-host bbgl-demo-maskable" data-mask-text="Not available in demo mode">${stack}</div>`);
+    }
+
+    function getSettingsHTML() {
+        return `<div class="close-settings-btn" title="Close Settings">${ICONS.CHECK}</div><div class="bbgl-settings-scroll-area">${buildSettingsInterfaceSection()}${buildSettingsApiSection()}${buildSettingsDataSection()}${buildSettingsInfoSection()}</div>`;
+    }
+
+    // Step 4: getDashboardHTML uses getSettingsHTML() for the settings view
+    function getDashboardHTML() {
+        const CROWN = `<svg viewBox="0 0 24 24"><path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/></svg>`;
+        const weekDays = userConfig.weekStartMode === 'mon' ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const weekRowHTML = weekDays.map(d => `<span>${d}</span>`).join('');
+        return `<div class="bbgl-header" id="bbgl-header-bar"><div class="bbgl-header-left">${ICONS.LOGO}<span class="bbgl-header-text"><span class="bbgl-short-title">Big Black Log</span><span class="bbgl-long-title">Big Black Gym Log</span></span></div><div class="bbgl-header-right"><span id="bbgl-demo-exit-btn" class="bbgl-custom-icon" style="display:${runtime.demoMode ? 'inline-flex' : 'none'};" data-tooltip-html="${TOOLTIPS.DEMO_EXIT_HTML}">✕</span><span id="bbgl-settings-btn" class="bbgl-custom-icon">⚙</span><span id="bbgl-close-btn" class="bbgl-native-icon">${ICONS.MINIMIZE}</span><span id="bbgl-pop-btn" class="bbgl-native-icon">${viewState.expanded ? ICONS.MAXIMIZE : ICONS.POPOUT}</span></div></div><div id="bbgl-content-wrapper"><div id="bbgl-top-panel"><div id="bbgl-tall-toggle">${viewState.isTall ? '–' : '+'}</div><div id="bbgl-ledger-toggle" data-tooltip="${TOOLTIPS.LEDGER_VIEW}">${ICONS.LEDGER}</div><div id="bbgl-graph-toggle" data-tooltip="${TOOLTIPS.GRAPH_VIEW}">${ICONS.GRAPH}</div><div id="bbgl-achievements-toggle" data-tooltip="${TOOLTIPS.ACHIEVEMENTS}">${ICONS.ACHIEVEMENTS}</div><div id="bbgl-sticker-toggle" data-tooltip="${TOOLTIPS.STICKERBOOK}">${ICONS.STICKERBOOK}</div><div id="bbgl-copy-btn" class="copy-hist-btn" data-tooltip="${TOOLTIPS.COPY_SESSION}">${ICONS.CLIPBOARD}</div><div id="bbgl-sticker-title"></div><div class="ui-floating-label" id="bbgl-date-label">LOADING...</div><div class="ui-floating-summary" id="bbgl-summary-label"></div><div id="bbgl-ledger-view" class="ledger-content"></div><div id="bbgl-graph-container"><div class="g-hud"><div class="g-toggles"><div class="g-pill active" data-type="mode" data-val="values">Gains</div><div class="g-pill" data-type="mode" data-val="rates">Rates</div></div><div class="g-toggles"><div class="g-pill p-str active" data-type="stat" data-val="str">STR</div><div class="g-pill p-def" data-type="stat" data-val="def">DEF</div><div class="g-pill p-spd active" data-type="stat" data-val="spd">SPD</div><div class="g-pill p-dex" data-type="stat" data-val="dex">DEX</div><div class="g-pill p-tot" data-type="stat" data-val="total">TOT</div></div></div><svg id="bbgl-graph-svg"></svg></div><div id="bbgl-achievements-container" class="ledger-content"><div class="bbgl-coming-soon">Cumming<br>Soon...</div></div><div id="bbgl-sticker-bg"></div><div id="bbgl-sticker-container"><div id="sticker-prev-btn" class="sticker-nav-btn">❮</div><div id="sticker-next-btn" class="sticker-nav-btn">❯</div><div id="bbgl-sticker-grid"></div><div id="bbgl-sticker-pagination"></div></div><div class="glass-overlay"></div></div><div id="bbgl-bottom-panel"><div class="bbgl-header-wrapper"><div class="bbgl-month-header"><div class="title-group"><div class="title-stack"><div id="all-time-btn" class="all-time-btn" data-tooltip="${TOOLTIPS.ALL_TIME_SUMMARY}">${CROWN}</div><div class="header-row"><div class="header-trigger" id="year-trigger"></div><div class="stats-btn" id="year-stats-btn" data-tooltip="${TOOLTIPS.YEARLY_SUMMARY}">${ICONS.CHART}</div><div id="bbgl-year-dropdown" class="bbgl-dropdown-menu"></div></div><div class="header-row"><div class="header-trigger" id="month-trigger"></div><div class="stats-btn" id="month-stats-btn" data-tooltip="${TOOLTIPS.MONTHLY_SUMMARY}">${ICONS.CHART}</div><div id="bbgl-month-dropdown" class="bbgl-dropdown-menu"></div></div></div></div><button class="arrow-btn" id="prev-month-btn">❮</button><button class="arrow-btn" id="next-month-btn">❯</button></div></div><div id="bbgl-demo-exit" style="display: ${runtime.demoMode ? 'flex' : 'none'};" data-tooltip="${TOOLTIPS.DEMO_EXIT}" data-tooltip-html="${TOOLTIPS.DEMO_EXIT_HTML}">DEMO MODE</div><div class="bbgl-grid-container"><div class="bbgl-week-row">${weekRowHTML}</div><div class="calendar-wrapper" id="swipe-area"><div id="bbgl-cal-container" class="bbgl-cal-container"></div></div></div></div><div id="bbgl-item-viewer"><div class="viewer-window"><div class="viewer-stage"><div class="viewer-pedestal" id="vi-pedestal-wrapper"><div class="viewer-obj" id="vi-obj-target"><div class="layer-front"></div><div class="layer-back"></div></div></div></div></div><div class="viewer-info-overlay"><div class="vi-name" id="vi-name-target">Item Name</div></div></div><div id="bbgl-settings-view">${getSettingsHTML()}</div><div id="bbgl-welcome-view"></div>`;
+    }
+
+    /**
+     *  [SECTION VII] THE MIRRORS (Graph Engine)
+     *  ========================================================================
+     *  Reflection. Visualizing the progress. Staring at your own curves
+     *  (mathematically speaking).
+     */
+
+    const GraphController = {
+        _transformData({ selectedData, selectedLabel, year, graphMode }) {
+            const isToday = !selectedData, lbl = selectedLabel || ""; let vt = 'DAY', sl = null;
+            if (isToday) { sl = DataController.getSlice('DAY', Formatter.dateLogical()); vt = 'DAY'; }
+            else if (lbl === 'All-Time') { sl = DataController.getSlice('ALL', 'All-Time'); vt = 'ALL'; }
+            else if (/^\d{4}-\d{2}-\d{2}$/.test(lbl)) { sl = DataController.getSlice('DAY', lbl); vt = 'DAY'; }
+            else if (/^\d{4}$/.test(lbl)) { sl = DataController.getSlice('YEAR', lbl); vt = 'YEAR'; }
+            else if (CONSTANTS.MONTHS.includes(lbl)) { sl = DataController.getSlice('MONTH', lbl, year); vt = 'MONTH'; }
+            else { sl = selectedData; vt = 'WEEK'; }
+
+            if (!sl) return { labels: [], trends: { str: [], def: [], spd: [], dex: [], total: [] }, viewType: vt, xParams: { min: 0, max: 0 } };
+
+            const isR = graphMode === 'rates', labs = [], tr = { str: [], def: [], spd: [], dex: [], total: [] }, xp = { min: 0, max: 0 }, st = STAT_KEYS, tl = DataController.getTimeline(), h = getActiveHistory();
+            let sr = { ...ZERO_BREAKDOWN, total: 0 }, startTs = 0;
+
+            if (vt === 'DAY') { const _p = sl.date.split('-'); startTs = TimeManager.dayStartTs(sl.date); }
+            else if (vt === 'MONTH') { startTs = new Date(Date.UTC(year, CONSTANTS.MONTHS.indexOf(lbl), 1)).getTime(); }
+            else if (vt === 'YEAR') { startTs = new Date(Date.UTC(parseInt(lbl), 0, 1)).getTime(); }
+            else if (vt === 'ALL' && sl._dailyList.length > 0) { startTs = Formatter.parse(sl._dailyList[0].date).getTime(); }
+            else if (sl._dailyList.length > 0) { startTs = Formatter.parse(sl._dailyList[0].date).getTime(); }
+
+            const _histCut = sl.date || (sl._dailyList?.[0]?.date) || '';
+            const hist = tl.filter(d => _histCut ? d.date < _histCut : new Date(d.date + 'T00:00:00Z').getTime() < startTs).reverse();
+            const _allHistDays = [...(h.history || [])], _or = (h.meta && h.meta.originRates) || {};
+            st.forEach(s => { const last = hist.find(d => (d.eSpent?.[s] || 0) > 0); if (last) { sr[s] = ((last.gains?.[s] || 0) / (last.eSpent[s] || 0)) * 150; } else { let _bt = -1, _br = 0; _allHistDays.forEach(day => { (day.series || []).forEach(e => { if (e.stat === s && e.ts * 1000 < startTs && e.cost > 0 && e.ts > _bt) { _bt = e.ts; _br = e.rate !== undefined ? e.rate : (e.gain / e.cost) * 150; } }); }); sr[s] = _br || _or[s] || 0; } });
+            sr.total = st.reduce((a, b) => a + (sr[b] || 0), 0);
+
+            const globalBaseline = (h.meta && h.meta.baselineBreakdown) || { ...ZERO_BREAKDOWN };
+            if (vt === 'DAY') {
+                const raw = DataController.getDateMap()[sl.date], start = startTs; xp.min = start; xp.max = start + 864e5; for (let i = 0; i <= 24; i += 2) labs.push(`${i}:00`);
+                if (raw && raw.series) st.forEach(s => { if (sr[s] === 0) { const fLog = raw.series.find(l => l.stat === s); if (fLog && fLog.cost > 0) sr[s] = (fLog.gain / fLog.cost) * 150; } });
+                const ser = (raw && raw.series) ? raw.series : [];
+                const sSt = (raw && (raw.startBreakdown || raw.start)) ? (raw.startBreakdown || raw.start) : (hist[0] && (hist[0].endBreakdown || hist[0].end)) ? (hist[0].endBreakdown || hist[0].end) : globalBaseline;
+                const getSt = (ts) => { let r = { ...sSt }; ser.filter(s => (s.ts * 1000) <= ts).forEach(s => { r[s.stat] = s.after; }); return r; };
+                const getRt = (tsS, tsE) => { const rel = ser.filter(s => (s.ts * 1000) > tsS && (s.ts * 1000) <= tsE); if (rel.length === 0) return null; let et = 0, g = { ...ZERO_BREAKDOWN, total: 0 }, cs = { ...ZERO_BREAKDOWN }; rel.forEach(s => { et += s.cost; g[s.stat] += s.gain; g.total += s.gain; cs[s.stat] += s.cost; }); return { str: cs.str > 0 ? (g.str / cs.str) * 150 : 0, def: cs.def > 0 ? (g.def / cs.def) * 150 : 0, spd: cs.spd > 0 ? (g.spd / cs.spd) * 150 : 0, dex: cs.dex > 0 ? (g.dex / cs.dex) * 150 : 0, total: et > 0 ? (g.total / et) * 150 : 0 }; };
+                let lr = { ...sr }, now = Date.now();
+                let runningRates = { ...sr };
+                for (let i = 0; i <= 24; i += 2) { const tick = start + (i * 3600 * 1000), fut = (isToday && tick > now), pt = fut ? now : tick; if (isR) { const prev = start + ((i - 2) * 3600 * 1000), ss = (i === 0) ? start : prev, rt = getRt(ss, pt); if (rt) { st.forEach(s => { if (rt[s] > 0) lr[s] = rt[s]; }); lr.total = st.reduce((a, s) => a + (lr[s] || 0), 0); } st.forEach(s => tr[s].push({ x: pt, y: lr[s] })); tr.total.push({ x: pt, y: lr.total }); } else { const sn = getSt(pt); st.forEach(s => tr[s].push({ x: pt, y: (sn[s] || 0) })); tr.total.push({ x: pt, y: (sn.str || 0) + (sn.def || 0) + (sn.spd || 0) + (sn.dex || 0) }); } if (fut) break; }
+
+                // --- THE MISSING BLUEPRINT FOR MONTH / WEEK ---
+            } else if (vt === 'MONTH' || vt === 'WEEK') {
+                const dl = sl._dailyList.sort((a, b) => a.date.localeCompare(b.date));
+                let runningRates = { ...sr };
+                let curVals = { ...globalBaseline };
+                const _prePeriodDay = hist.find(d => { const e = d.endBreakdown || d.end; return e && (e.str || e.def || e.spd || e.dex); });
+                if (_prePeriodDay) { curVals = { ...(_prePeriodDay.endBreakdown || _prePeriodDay.end) }; }
+                else if (dl.length > 0) { const f = dl[0].startBreakdown || dl[0].start; if (f && (f.str || f.def || f.spd || f.dex)) curVals = { ...f }; }
+
+                // Pre-compute live values for today from raw series (same source as DAY view)
+                // Must be done before the forEach so today's integer point also uses live data
+                const todayStr = Formatter.dateLogical();
+                const _todayRaw = DataController.getDateMap()[todayStr];
+                let _liveVals = null;
+                if (!isR && _todayRaw) {
+                    const _nowMs = Date.now(), _ser = _todayRaw.series || [];
+                    const _base = _todayRaw.startBreakdown || _todayRaw.start || {};
+                    _liveVals = { ..._base };
+                    _ser.filter(e => (e.ts * 1000) <= _nowMs).forEach(e => { _liveVals[e.stat] = e.after; });
+                }
+
+                // 1. Establish the Fixed Domain and Labels upfront
+                if (vt === 'WEEK') {
+                    xp.min = 0;
+                    xp.max = 6;
+                    const fdStr = dl[0] ? dl[0].date : Formatter.dateLogical();
+                    const fd = Formatter.parse(fdStr);
+                    const dayIdx = fd.getUTCDay();
+                    const weekOffset = userConfig.weekStartMode === 'mon' ? (dayIdx === 0 ? 6 : dayIdx - 1) : dayIdx;
+                    const weekStart = new Date(fd);
+                    weekStart.setUTCDate(fd.getUTCDate() - weekOffset);
+
+                    for (let i = 0; i < 7; i++) {
+                        const d = new Date(weekStart);
+                        d.setUTCDate(weekStart.getUTCDate() + i);
+                        labs.push(Formatter.dateISO(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+                    }
+                } else { // MONTH
+                    const y = year || new Date().getUTCFullYear();
+                    const mIdx = CONSTANTS.MONTHS.indexOf(lbl);
+                    const dim = new Date(y, mIdx + 1, 0).getDate();
+                    xp.min = 1;
+                    xp.max = dim;
+                    for (let i = 1; i <= dim; i++) {
+                        labs.push(String(i));
+                    }
+                }
+
+                // 2. Plot the data independently into the domain
+                dl.forEach((d) => {
+                    let xVal = 0;
+                    if (vt === 'WEEK') {
+                        xVal = labs.indexOf(d.date);
+                        if (xVal === -1) return;
+                    } else { // MONTH
+                        xVal = parseInt(d.date.split('-')[2], 10);
+                    }
+
+                    if (isR) {
+                        const ser = d.series || [];
+                        st.forEach(s => { for (let i = ser.length - 1; i >= 0; i--) { const e = ser[i]; if (e.stat === s && e.cost > 0) { runningRates[s] = e.rate !== undefined ? e.rate : (e.gain / e.cost) * 150; break; } } });
+                        runningRates.total = st.reduce((a, s) => a + (runningRates[s] || 0), 0);
+                        st.forEach(s => tr[s].push({ x: xVal, y: runningRates[s] }));
+                        tr.total.push({ x: xVal, y: runningRates.total });
+                    } else {
+                        // hasVals: only overwrite curVals if the breakdown has at least one real stat.
+                        // A day object initialised by rollover but never trained has endBreakdown: {str:0,...}
+                        // which is truthy but would incorrectly zero-out the carry-forward value.
+                        const _hv = (o) => o && (o.str || o.def || o.spd || o.dex);
+                        if (d.date === todayStr) {
+                            // Plot today's position at start-of-day value so the blip shows a rise to current gains
+                            const start = d.startBreakdown || d.start || curVals;
+                            if (_hv(start)) curVals = { ...start };
+                        } else {
+                            const end = d.endBreakdown || d.end;
+                            if (_hv(end)) curVals = { ...end };
+                        }
+                        st.forEach(s => tr[s].push({ x: xVal, y: curVals[s] || 0 }));
+                        tr.total.push({ x: xVal, y: (curVals.str || 0) + (curVals.def || 0) + (curVals.spd || 0) + (curVals.dex || 0) });
+                    }
+                });
+
+                // Current-position blip: extend line to exact fractional position within today
+                const _blipLive = _liveVals || curVals;
+                if (vt === 'WEEK') {
+                    const todayXBase = labs.indexOf(todayStr);
+                    if (todayXBase !== -1) {
+                        const [ty, tm, td] = todayStr.split('-');
+                        const dayStart = TimeManager.dayStartTs(todayStr);
+                        const nowX = todayXBase + Math.min((Date.now() - dayStart) / 864e5, 1);
+                        if (isR) { st.forEach(s => tr[s].push({ x: nowX, y: runningRates[s] })); tr.total.push({ x: nowX, y: runningRates.total }); }
+                        else { st.forEach(s => tr[s].push({ x: nowX, y: _blipLive[s] || 0 })); tr.total.push({ x: nowX, y: (_blipLive.str || 0) + (_blipLive.def || 0) + (_blipLive.spd || 0) + (_blipLive.dex || 0) }); }
+                    }
+                } else {
+                    const [ty, tm, td] = todayStr.split('-');
+                    const yForMonth = year || new Date().getUTCFullYear();
+                    if (parseInt(tm) - 1 === CONSTANTS.MONTHS.indexOf(lbl) && parseInt(ty) === yForMonth) {
+                        const dayNum = parseInt(td, 10);
+                        const dayStart = TimeManager.dayStartTs(todayStr);
+                        const nowX = dayNum + Math.min((Date.now() - dayStart) / 864e5, 1);
+                        if (isR) { st.forEach(s => tr[s].push({ x: nowX, y: runningRates[s] })); tr.total.push({ x: nowX, y: runningRates.total }); }
+                        else { st.forEach(s => tr[s].push({ x: nowX, y: _blipLive[s] || 0 })); tr.total.push({ x: nowX, y: (_blipLive.str || 0) + (_blipLive.def || 0) + (_blipLive.spd || 0) + (_blipLive.dex || 0) }); }
+                    }
+                }
+
+            } else if (vt === 'YEAR') {
+                labs.push(...CONSTANTS.MONTHS_SHORT);
+                const yInt = parseInt(lbl), now = new Date(), isCur = yInt === TimeManager.year(now), curM = TimeManager.month(now);
+
+                // The Fix: Exactly 12 domain slots (0 through 11)
+                xp.min = 0; xp.max = 11;
+
+                const dl = sl._dailyList.sort((a, b) => a.date.localeCompare(b.date));
+                let baseline = { ...globalBaseline };
+                const _preYearDay = hist.find(d => { const e = d.endBreakdown || d.end; return e && (e.str || e.def || e.spd || e.dex); });
+                if (_preYearDay) baseline = { ...(_preYearDay.endBreakdown || _preYearDay.end) };
+                else if (dl.length > 0) { const f = dl[0].startBreakdown || dl[0].start; if (f && (f.str || f.def || f.spd || f.dex)) baseline = { ...f }; }
+                let runningRates = { ...sr };
+
+                const getStatsAtMonthEnd = (mIndex) => {
+                    // Safely rollover the year to avoid the "2024-13-01" bug
+                    const nextM = new Date(Date.UTC(yInt, mIndex + 1, 1));
+                    const endStr = Formatter.dateISO(nextM.getUTCFullYear(), nextM.getUTCMonth(), 1);
+                    const prevLogs = dl.filter(d => d.date < endStr);
+                    if (prevLogs.length > 0) {
+                        const l = prevLogs[prevLogs.length - 1];
+                        return l.endBreakdown || l.end || baseline;
+                    }
+                    return baseline;
+                };
+
+                const getRateForMonth = (mIndex) => {
+                    const startStr = Formatter.dateISO(yInt, mIndex, 1);
+                    const nextM = new Date(Date.UTC(yInt, mIndex + 1, 1));
+                    const endStr = Formatter.dateISO(nextM.getUTCFullYear(), nextM.getUTCMonth(), 1);
+                    const mLogs = dl.filter(d => d.date >= startStr && d.date < endStr);
+
+                    const allSer = mLogs.flatMap(d => d.series || []);
+                    let rObj = { ...ZERO_BREAKDOWN, total: 0 };
+                    st.forEach(s => { for (let i = allSer.length - 1; i >= 0; i--) { const e = allSer[i]; if (e.stat === s && e.cost > 0) { rObj[s] = e.rate !== undefined ? e.rate : (e.gain / e.cost) * 150; break; } } });
+                    rObj.total = st.reduce((a, s) => a + (rObj[s] || 0), 0);
+                    return rObj;
+                };
+
+                const firstLogMonth = dl.length > 0 ? Formatter.parse(dl[0].date).getUTCMonth() : 12;
+                const limit = isCur ? curM : 11;
+                for (let i = 0; i <= limit; i++) {
+                    if (i < firstLogMonth) continue;
+                    if (isR) {
+                        const r = getRateForMonth(i);
+                        st.forEach(s => { if (r[s] > 0) runningRates[s] = r[s]; });
+                        runningRates.total = st.reduce((a, s) => a + (runningRates[s] || 0), 0);
+                        st.forEach(s => tr[s].push({ x: i, y: runningRates[s] }));
+                        tr.total.push({ x: i, y: runningRates.total });
+                    } else {
+                        // For current month's integer point use start-of-month value so blip shows within-month progress
+                        const sVal = (isCur && i === curM) ? getStatsAtMonthEnd(curM - 1) : getStatsAtMonthEnd(i);
+                        st.forEach(s => tr[s].push({ x: i, y: sVal[s] || 0 }));
+                        tr.total.push({ x: i, y: (sVal.str || 0) + (sVal.def || 0) + (sVal.spd || 0) + (sVal.dex || 0) });
+                    }
+                }
+                // Current-position blip: fractional position within current month
+                if (isCur) {
+                    const curDay = TimeManager.date(now);
+                    const daysInCurMonth = new Date(yInt, curM + 1, 0).getDate();
+                    const nowX = curM + (curDay - 1) / daysInCurMonth;
+                    if (isR) { st.forEach(s => tr[s].push({ x: nowX, y: runningRates[s] })); tr.total.push({ x: nowX, y: runningRates.total }); }
+                    else { const sVal = getStatsAtMonthEnd(curM); st.forEach(s => tr[s].push({ x: nowX, y: sVal[s] })); tr.total.push({ x: nowX, y: sVal.str + sVal.def + sVal.spd + sVal.dex }); }
+                }
+            } else if (vt === 'ALL') {
+                const dl = sl._dailyList.sort((a, b) => a.date.localeCompare(b.date));
+                if (dl.length === 0) return { labels: [], trends: tr, viewType: vt, xParams: { min: 0, max: 0 } };
+
+                const now = new Date();
+                const firstDate = Formatter.parse(dl[0].date);
+                const daysElapsed = Math.floor((now.getTime() - firstDate.getTime()) / 864e5);
+
+                if (daysElapsed < 7) {
+                    // TIER 1: Week view anchored to first recorded day (not Sunday)
+                    vt = 'ALL_WEEK';
+                    xp.min = 0; xp.max = 6;
+                    for (let i = 0; i < 7; i++) {
+                        const d = new Date(firstDate);
+                        d.setUTCDate(firstDate.getUTCDate() + i);
+                        labs.push(Formatter.dateISO(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+                    }
+                    const aw1TodayStr = Formatter.dateLogical();
+                    const aw1Raw = DataController.getDateMap()[aw1TodayStr];
+                    let aw1Live = null;
+                    if (!isR && aw1Raw) { const _ns = Date.now(), _ser = aw1Raw.series || [], _b = aw1Raw.startBreakdown || aw1Raw.start || {}; aw1Live = { ..._b }; _ser.filter(e => (e.ts * 1000) <= _ns).forEach(e => { aw1Live[e.stat] = e.after; }); }
+                    let runningRates = { ...sr }, curVals = (dl[0].startBreakdown || dl[0].start || globalBaseline);
+                    dl.forEach(d => {
+                        const xVal = labs.indexOf(d.date);
+                        if (xVal === -1) return;
+                        if (isR) {
+                            const ser = d.series || [];
+                            st.forEach(s => { for (let i = ser.length - 1; i >= 0; i--) { const e = ser[i]; if (e.stat === s && e.cost > 0) { runningRates[s] = e.rate !== undefined ? e.rate : (e.gain / e.cost) * 150; break; } } });
+                            runningRates.total = st.reduce((a, s) => a + (runningRates[s] || 0), 0);
+                            st.forEach(s => tr[s].push({ x: xVal, y: runningRates[s] }));
+                            tr.total.push({ x: xVal, y: runningRates.total });
+                        } else {
+                            const _hv = (o) => o && (o.str || o.def || o.spd || o.dex);
+                            if (d.date === aw1TodayStr) { const start = d.startBreakdown || d.start || curVals; if (_hv(start)) curVals = { ...start }; }
+                            else { const end = d.endBreakdown || d.end; if (_hv(end)) curVals = { ...end }; }
+                            st.forEach(s => tr[s].push({ x: xVal, y: curVals[s] || 0 }));
+                            tr.total.push({ x: xVal, y: (curVals.str || 0) + (curVals.def || 0) + (curVals.spd || 0) + (curVals.dex || 0) });
+                        }
+                    });
+                    // Current-position blip
+                    const aw1XBase = labs.indexOf(aw1TodayStr);
+                    if (aw1XBase !== -1) {
+                        const [aw1Y, aw1M, aw1D] = aw1TodayStr.split('-');
+                        const aw1Start = TimeManager.dayStartTs(aw1TodayStr);
+                        const aw1NowX = aw1XBase + Math.min((Date.now() - aw1Start) / 864e5, 1);
+                        const aw1Blip = aw1Live || curVals;
+                        if (isR) { st.forEach(s => tr[s].push({ x: aw1NowX, y: runningRates[s] })); tr.total.push({ x: aw1NowX, y: runningRates.total }); }
+                        else { st.forEach(s => tr[s].push({ x: aw1NowX, y: aw1Blip[s] || 0 })); tr.total.push({ x: aw1NowX, y: (aw1Blip.str || 0) + (aw1Blip.def || 0) + (aw1Blip.spd || 0) + (aw1Blip.dex || 0) }); }
+                    }
+                    return { labels: labs, trends: tr, viewType: vt, xParams: xp };
+
+                } else if (daysElapsed < 31) {
+                    // TIER 2: Month view anchored to first recorded day, calendar day numbers wrap naturally
+                    vt = 'ALL_MONTH';
+                    xp.min = 0; xp.max = 30;
+                    for (let i = 0; i < 31; i++) {
+                        const d = new Date(firstDate);
+                        d.setUTCDate(firstDate.getUTCDate() + i);
+                        labs.push(String(d.getUTCDate()));
+                    }
+                    const am1TodayStr = Formatter.dateLogical();
+                    const am1Raw = DataController.getDateMap()[am1TodayStr];
+                    let am1Live = null;
+                    if (!isR && am1Raw) { const _ns = Date.now(), _ser = am1Raw.series || [], _b = am1Raw.startBreakdown || am1Raw.start || {}; am1Live = { ..._b }; _ser.filter(e => (e.ts * 1000) <= _ns).forEach(e => { am1Live[e.stat] = e.after; }); }
+                    let runningRates = { ...sr }, curVals = (dl[0].startBreakdown || dl[0].start || globalBaseline);
+                    dl.forEach(d => {
+                        const dDate = Formatter.parse(d.date);
+                        const xVal = Math.round((dDate.getTime() - firstDate.getTime()) / 864e5);
+                        if (xVal < 0 || xVal > 30) return;
+                        if (isR) {
+                            const ser = d.series || [];
+                            st.forEach(s => { for (let i = ser.length - 1; i >= 0; i--) { const e = ser[i]; if (e.stat === s && e.cost > 0) { runningRates[s] = e.rate !== undefined ? e.rate : (e.gain / e.cost) * 150; break; } } });
+                            runningRates.total = st.reduce((a, s) => a + (runningRates[s] || 0), 0);
+                            st.forEach(s => tr[s].push({ x: xVal, y: runningRates[s] }));
+                            tr.total.push({ x: xVal, y: runningRates.total });
+                        } else {
+                            const _hv = (o) => o && (o.str || o.def || o.spd || o.dex);
+                            if (d.date === am1TodayStr) { const start = d.startBreakdown || d.start || curVals; if (_hv(start)) curVals = { ...start }; }
+                            else { const end = d.endBreakdown || d.end; if (_hv(end)) curVals = { ...end }; }
+                            st.forEach(s => tr[s].push({ x: xVal, y: curVals[s] || 0 }));
+                            tr.total.push({ x: xVal, y: (curVals.str || 0) + (curVals.def || 0) + (curVals.spd || 0) + (curVals.dex || 0) });
+                        }
+                    });
+                    // Current-position blip: days elapsed from anchor + fraction through today
+                    const am1DaysFrom = Math.floor((Date.now() - firstDate.getTime()) / 864e5);
+                    if (am1DaysFrom >= 0 && am1DaysFrom <= 30) {
+                        const [am1Yr, am1Mo, am1Dy] = am1TodayStr.split('-');
+                        const am1Start = TimeManager.dayStartTs(am1TodayStr);
+                        const am1NowX = am1DaysFrom + Math.min((Date.now() - am1Start) / 864e5, 1);
+                        const am1Blip = am1Live || curVals;
+                        if (isR) { st.forEach(s => tr[s].push({ x: am1NowX, y: runningRates[s] })); tr.total.push({ x: am1NowX, y: runningRates.total }); }
+                        else { st.forEach(s => tr[s].push({ x: am1NowX, y: am1Blip[s] || 0 })); tr.total.push({ x: am1NowX, y: (am1Blip.str || 0) + (am1Blip.def || 0) + (am1Blip.spd || 0) + (am1Blip.dex || 0) }); }
+                    }
+                    return { labels: labs, trends: tr, viewType: vt, xParams: xp, anchorDate: firstDate };
+
+                } else {
+                    // TIER 3: Month-by-month across all history (existing logic, untouched)
+                    const curY = TimeManager.year(now);
+                    const curM = TimeManager.month(now);
+                    const curD = TimeManager.date(now);
+
+                    let iter = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 1));
+                    let idx = 0;
+                    let baseline = (dl[0].startBreakdown || dl[0].start || globalBaseline);
+                    let runningRates = { ...sr };
+
+                    while (iter <= now) {
+                        const y = iter.getUTCFullYear();
+                        const m = iter.getUTCMonth();
+                        const isCur = (y === curY && m === curM);
+
+                        labs.push(`${CONSTANTS.MONTHS_SHORT[m]} '${String(y).substring(2)}`);
+
+                        if (isR) {
+                            const startStr = Formatter.dateISO(y, m, 1);
+                            const nextM = new Date(iter);
+                            nextM.setUTCMonth(nextM.getUTCMonth() + 1);
+                            const endStr = Formatter.dateISO(nextM.getUTCFullYear(), nextM.getUTCMonth(), 1);
+
+                            const mLogs = dl.filter(d => d.date >= startStr && d.date < endStr);
+
+                            let g = { ...ZERO_BREAKDOWN, total: 0 };
+                            let c = { ...ZERO_BREAKDOWN, total: 0 };
+
+                            for (const l of mLogs) {
+                                for (const s of st) {
+                                    g[s] += (l.gains?.[s] || 0);
+                                    c[s] += (l.eSpent[s] || 0);
+                                }
+                                g.total += (l.gains?.total || 0);
+                                c.total += (l.eSpent.total || 0);
+                            }
+
+                            let rObj = {};
+                            for (const s of st) { if (c[s] > 0) rObj[s] = (g[s] / c[s]) * 150; }
+                            if (c.total > 0) rObj.total = (g.total / c.total) * 150;
+
+                            for (const s of st) { if (rObj[s] > 0) runningRates[s] = rObj[s]; }
+                            runningRates.total = st.reduce((a, s) => a + (runningRates[s] || 0), 0);
+
+                            for (const s of st) { tr[s].push({ x: idx, y: runningRates[s] }); }
+                            tr.total.push({ x: idx, y: runningRates.total });
+
+                            if (isCur) {
+                                const dim = new Date(y, m + 1, 0).getDate();
+                                const frac = curD / dim;
+                                for (const s of st) { tr[s].push({ x: idx + frac, y: runningRates[s] }); }
+                                tr.total.push({ x: idx + frac, y: runningRates.total });
+                            }
+
+                        } else {
+                            const dStr = Formatter.dateISO(y, m, 1);
+                            const prevLogs = dl.filter(d => d.date < dStr);
+                            let startVal = baseline;
+                            if (prevLogs.length > 0) {
+                                const l = prevLogs[prevLogs.length - 1];
+                                startVal = l.endBreakdown || l.end || baseline;
+                            }
+
+                            for (const s of st) { tr[s].push({ x: idx, y: startVal[s] }); }
+                            tr.total.push({ x: idx, y: (startVal.str || 0) + (startVal.def || 0) + (startVal.spd || 0) + (startVal.dex || 0) });
+
+                            if (isCur) {
+                                const dim = new Date(y, m + 1, 0).getDate();
+                                const frac = curD / dim;
+                                const lastLog = dl[dl.length - 1];
+                                const curVal = lastLog.endBreakdown || lastLog.end || startVal;
+
+                                for (const s of st) { tr[s].push({ x: idx + frac, y: curVal[s] }); }
+                                tr.total.push({ x: idx + frac, y: (curVal.str || 0) + (curVal.def || 0) + (curVal.spd || 0) + (curVal.dex || 0) });
+                            }
+                        }
+
+                        iter.setUTCMonth(m + 1);
+                        idx++;
+                    }
+
+                    xp.min = 0;
+                    const dim = new Date(curY, curM + 1, 0).getDate();
+                    xp.max = Math.max(0, (idx - 1) + (curD / dim));
+                    return { labels: labs, trends: tr, viewType: vt, xParams: xp, anchorDate: new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 1)) };
+                }
+            }
+            return { labels: labs, trends: tr, viewType: vt, xParams: xp };
+        },
+
+        draw() {
+            if (document.hidden) { runtime.graphDirty = true; return; }
+            const svg = dom.graphSvg, cont = dom.graphContainer; if (!svg || !cont) return;
+            const dat = GraphController._transformData({ selectedData: calendarState.selectedData, selectedLabel: calendarState.selectedLabel, year: calendarState.year, graphMode: graphState.mode }), tr = dat.trends, lbls = dat.labels, vt = dat.viewType, xp = dat.xParams; svg.textContent = ''; svg.setAttribute('preserveAspectRatio', 'none');
+            const w = cont.clientWidth || 300, _rawH = svg.clientHeight || (cont.clientHeight - 26) || 0, h = _rawH > 0 ? _rawH : 0;
+            if (h <= 0) return; // layout not ready; ResizeObserver will retry once dimensions resolve
+            const cmp = w < 450; svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+            let mar = { top: 10, bottom: 15, left: 32, right: 18 }; if (cmp) { mar.left = 22; mar.bottom = 5; mar.right = 5; }
+            const cw = w - mar.left - mar.right, ch = h - mar.top - mar.bottom;
+            if (cw <= 0 || ch <= 0) return; // margins exceed container; layout not ready
+            const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); g.setAttribute("transform", `translate(${mar.left}, ${mar.top})`);
+            let min = Infinity, max = -Infinity, hd = false; graphState.activeStats.forEach(s => { if (tr[s] && tr[s].length > 0) { hd = true; tr[s].forEach(p => { if (!isFinite(p.y)) return; if (p.y < min) min = p.y; if (p.y > max) max = p.y; }); } });
+            if (!hd || min === Infinity) { min = 0; STAT_KEYS.forEach(s => { if (tr[s] && tr[s].length > 0) tr[s].forEach(p => { if (isFinite(p.y) && p.y > max) max = p.y; }); }); }
+            if (max === -Infinity) { min = 0; max = 10; }
+
+            // --- Graph Scaling Logic ---
+            let sc = GraphController._calculateNiceScale(min, max), fMin = sc.min, fMax = sc.max, step = sc.step, steps = Math.round((fMax - fMin) / step), pL = [], rng = fMax - fMin;
+            for (let i = 0; i <= steps; i++) pL.push(Formatter.axis(fMin + (i * step)));
+            if (new Set(pL).size < (steps + 1)) { const div = ((n) => { const a = Math.abs(n); if (a >= 1e12) return 1e12; if (a >= 1e9) return 1e9; if (a >= 1e6) return 1e6; if (a >= 1e3) return 1e3; return 1; })(max); fMin = Math.floor(min / div) * div; fMax = Math.ceil(max / div) * div; if (fMax <= fMin) fMax = fMin + div; step = div; if ((fMax - fMin) / step < 2) fMax = fMin + (step * 2); steps = Math.round((fMax - fMin) / step); }
+            let fr = fMax - fMin; if (fr <= 0) { fMax = fMin + 10; fr = 10; }
+            for (let i = 0; i <= steps; i++) { const v = fMin + (i * step), y = ch - ((v - fMin) / fr) * ch; if (isNaN(y)) continue; const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); l.setAttribute("x1", 0); l.setAttribute("x2", cw); l.setAttribute("y1", y); l.setAttribute("y2", y); l.setAttribute("class", "g-axis"); g.appendChild(l); const t = document.createElementNS("http://www.w3.org/2000/svg", "text"); t.setAttribute("x", -6); t.setAttribute("y", y + 3); t.setAttribute("class", "g-text y-label"); t.textContent = Formatter.axis(v); g.appendChild(t); }
+            const gx = (v) => { const r = xp.max - xp.min; return r === 0 ? 0 : ((v - xp.min) / r) * cw; }, gy = (v) => ch - ((v - fMin) / fr) * ch;
+            lbls.forEach((l, i) => {
+                let v = 0;
+                let txtOverride = null;
+                if (vt === 'DAY') v = xp.min + (i * 7200000);
+                else if (vt === 'YEAR') v = i;
+                else if (vt === 'MONTH') v = i + 1;
+                else if (vt === 'WEEK' || vt === 'ALL_WEEK' || vt === 'ALL_MONTH') v = i;
+                else if (vt === 'ALL') {
+                    v = i;
+                    const totalMonths = lbls.length;
+                    if (totalMonths > 36) {
+                        const anchor = dat.anchorDate;
+                        const origMonth = anchor ? anchor.getUTCMonth() : 0, origYear = anchor ? anchor.getUTCFullYear() : 0;
+                        const isOrigin = (i === 0), isJan = !isOrigin && (((origMonth + i) % 12) === 0);
+                        if (!isOrigin && !isJan) return;
+                        const yearIdx = isOrigin ? 0 : Math.floor((i + origMonth) / 12);
+                        const totalYearsShown = Math.floor((totalMonths - 1 + origMonth) / 12) + 1;
+                        const yearSkip = (cmp && totalYearsShown > 7) ? 2 : 1;
+                        if (yearIdx % yearSkip !== 0) return;
+                        txtOverride = String(origYear + yearIdx);
+                    } else {
+                        const skipExp = Math.max(1, Math.pow(2, Math.ceil(Math.log2(totalMonths / 12))));
+                        const skip = (cmp && totalMonths > 6) ? skipExp * 2 : skipExp;
+                        if (i % skip !== 0) return;
+                    }
+                }
+
+                if (v > xp.max && vt !== 'YEAR') return;
+                const x = gx(v);
+
+                // --- STANDARD MODE HIDERS (The Modulo Engine) ---
+                // If compressed (cmp), we skip specific indexes to save space
+                if ((vt === 'MONTH' || vt === 'ALL_MONTH') && cmp && i % 2 !== 0) return; // Keeps 1, 3, 5, 7...
+                if (vt === 'YEAR' && cmp && i % 2 === 0) return; // Keeps Feb, Apr, Jun...
+
+                const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                const yp = cmp ? ch + 13 : ch + 20;
+                t.setAttribute("x", x);
+                t.setAttribute("y", yp);
+
+                t.setAttribute("class", "g-text x-label");
+
+                // --- LABEL FORMATTING RULES ---
+                let txt = l;
+                if (vt === 'DAY' && cmp) txt = l.replace(':00', '');
+
+                if (vt === 'WEEK' || vt === 'ALL_WEEK') {
+                    const d = Formatter.parse(l);
+                    const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                    const fullDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+                    // Standard: "Sun" | Expanded: "Sunday"
+                    txt = cmp ? shortDays[d.getUTCDay()] : fullDays[d.getUTCDay()];
+                }
+
+                if (txtOverride !== null) txt = txtOverride;
+
+                t.textContent = txt;
+
+                // Widen the threshold to < 10 to guarantee the edges never clip
+                if (x < 10) t.setAttribute("text-anchor", "start");
+                else if ((cw - x) < 10) t.setAttribute("text-anchor", "end");
+                else t.setAttribute("text-anchor", "middle");
+
+                g.appendChild(t);
+            });
+            graphState.activeStats.forEach(s => {
+                if (!tr[s] || tr[s].length === 0) return; const arr = tr[s], sty = arr[0].y, col = (s === 'total' ? CONSTANTS.COLORS.TOT : (CONSTANTS.COLORS[s.toUpperCase()] || '#ffffff')); let str = sty; const vs = arr.find(p => p.y > 0); if (vs) str = vs.y; let d = "", _ps = false; arr.forEach((p) => { const x = gx(p.x), y = gy(p.y); if (!isFinite(x) || !isFinite(y)) { _ps = false; return; } if (!_ps) { d += `M ${x} ${y}`; _ps = true; } else d += ` L ${x} ${y}`; });
+                const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); p.setAttribute("d", d); p.setAttribute("stroke", col); p.setAttribute("class", "g-path"); p.setAttribute("vector-effect", "non-scaling-stroke"); g.appendChild(p);
+                const dns = (vt !== 'YEAR' && arr.length > 50);
+                arr.forEach((p, i) => {
+                    const x = gx(p.x), y = gy(p.y), grp = document.createElementNS("http://www.w3.org/2000/svg", "g"); grp.setAttribute("class", "g-point-group"); grp.setAttribute("data-stat", s); grp.setAttribute("data-cx", x); grp.setAttribute("data-cy", y);
+                    const hit = document.createElementNS("http://www.w3.org/2000/svg", "circle"); hit.setAttribute("cx", x); hit.setAttribute("cy", y); hit.setAttribute("r", 8); hit.setAttribute("fill", "transparent"); grp.appendChild(hit);
+                    if (!dns || i === arr.length - 1) { const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle"); dot.setAttribute("cx", x); dot.setAttribute("cy", y); dot.setAttribute("r", 4); dot.setAttribute("fill", col); dot.setAttribute("class", "g-point-visual"); grp.appendChild(dot); }
+                    let tl = "", stt = s === 'str' ? "STRENGTH" : s === 'def' ? "DEFENSE" : s === 'spd' ? "SPEED" : s === 'dex' ? "DEXTERITY" : "TOTAL STATS", body = "";
+                    if (vt === 'DAY') { const z = new Date(p.x); tl = `${CONSTANTS.MONTHS_SHORT[TimeManager.month(z)]} ${String(TimeManager.date(z)).padStart(2, '0')} • ${String(TimeManager.hours(z)).padStart(2, '0')}:${String(TimeManager.minutes(z)).padStart(2, '0')}`; }
+                    else if (vt === 'YEAR') { const isF = p.x % 1 !== 0; if (isF) { const d = new Date(); tl = `Current (${CONSTANTS.MONTHS_SHORT[TimeManager.month(d)]} ${TimeManager.date(d)})`; } else { const mName = CONSTANTS.MONTHS[p.x] || "End of Year"; tl = `Start of ${mName} ${calendarState.year || new Date().getUTCFullYear()}`; } }
+                    else if (vt === 'MONTH') { const z = Math.floor(p.x), sf = (n) => (n > 3 && n < 21) ? 'th' : (n % 10 === 1 ? 'st' : (n % 10 === 2 ? 'nd' : (n % 10 === 3 ? 'rd' : 'th'))); tl = `${CONSTANTS.MONTHS[calendarState.month]} ${z}${sf(z)}`; }
+                    else if (vt === 'ALL_MONTH') { const anchor = dat.anchorDate; const dd = new Date(anchor); dd.setUTCDate(anchor.getUTCDate() + Math.floor(p.x)); const z = dd.getUTCDate(), sf = (n) => (n > 3 && n < 21) ? 'th' : (n % 10 === 1 ? 'st' : (n % 10 === 2 ? 'nd' : (n % 10 === 3 ? 'rd' : 'th'))); tl = `${CONSTANTS.MONTHS[dd.getUTCMonth()]} ${z}${sf(z)}`; }
+                    else { const ds = lbls[Math.floor(p.x)]; if (ds && ds.includes('-')) tl = Formatter.datePretty(ds); else if (vt === 'ALL') { const isF = p.x % 1 !== 0; if (isF) tl = Formatter.dateFull(Formatter.dateLogical()); else tl = ds; } else tl = `${calendarState.selectedLabel || "Week ?"}, Day ${Math.floor(p.x) + 1}`; }
+                    let prevVal = sty; if (vt === 'YEAR') { if (p.x === 0) prevVal = p.y; else { const prevIdx = (p.x % 1 !== 0) ? Math.floor(p.x) : p.x - 1; const prevP = arr.find(pt => Math.abs(pt.x - prevIdx) < 0.01); if (prevP) prevVal = prevP.y; } } else prevVal = sty;
+                    if (graphState.mode === 'rates') { const cr = p.y, dl = cr - str, sg = dl >= 0 ? '+' : '', pc = str > 0 ? (dl / str) * 100 : 0; body = `<div class="tt-row"><span class="tt-label">Rate</span> <span class="tt-total">${cr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div><div class="tt-row"><span class="tt-label">Growth</span> <span style="color:${dl >= 0 ? CONSTANTS.COLORS.GAINS : '#ff5252'}; font-weight:bold;">${sg}${dl.toFixed(2)} <span style="font-size:10px; opacity:0.8;">(${sg}${pc.toFixed(1)}%)</span></span></div>`; }
+                    else if (graphState.mode === 'gains') body = `<div class="tt-row"><span class="tt-label">Gained</span> <span class="tt-val">+${Formatter.number(p.y)}</span></div>`;
+                    else { const cv = p.y, gv = (vt === 'YEAR' && p.x === 0) ? 0 : cv - prevVal, gs = gv >= 0 ? '+' : ''; body = `<div class="tt-row"><span class="tt-label">Total</span> <span class="tt-total">${Formatter.number(cv)}</span></div><div class="tt-row"><span class="tt-label">Gains</span> <span class="tt-val">${gs}${Formatter.number(gv)}</span></div>`; }
+                    grp.setAttribute("data-tooltip-html", `<div class="tt-header" style="border:none; margin-bottom:0; padding-bottom:0;">${tl}</div><div style="text-align:center; font-weight:bold; font-size:10px; color:${col}; margin-bottom:4px; letter-spacing:1px;">${stt}</div><div style="border-bottom:1px solid rgba(255,255,255,0.15); margin-bottom:5px;"></div>${body}`); g.appendChild(grp);
+                });
+            }); svg.appendChild(g); GraphController._setupScrubbing(cont, svg, mar);
+        },
+
+        _calculateNiceScale(min, max) {
+            if (min === max) return min === 0 ? { min: 0, max: 10, step: 5 } : { min: Math.floor(min * 0.9), max: Math.ceil(max * 1.1), step: (Math.ceil(max * 1.1) - Math.floor(min * 0.9)) / 2 };
+            let r = max - min, rs = r / 4, exp = Math.floor(Math.log10(rs)), base = Math.pow(10, exp), frac = rs / base;
+            let nf = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10, step = nf * base; if (step < 1) step = 1;
+            let gMin = Math.floor(min / step) * step, gMax = Math.ceil(max / step) * step;
+            if (Math.round((gMax - gMin) / step) + 1 > 5) { nf = nf === 1 ? 2 : nf === 2 ? 5 : nf === 5 ? 10 : 2; if (nf === 2 && step / base === 10) base *= 10; step = nf * base; gMin = Math.floor(min / step) * step; gMax = Math.ceil(max / step) * step; }
+            return { min: Math.max(0, gMin), max: gMax, step };
+        },
+
+        _setupScrubbing(c, s, m) {
+            if (graphState.handlers.scrub) { c.removeEventListener('mousemove', graphState.handlers.scrub); c.removeEventListener('touchmove', graphState.handlers.scrub); c.removeEventListener('mousedown', graphState.handlers.start); c.removeEventListener('touchstart', graphState.handlers.start); window.removeEventListener('mouseup', graphState.handlers.end); window.removeEventListener('touchend', graphState.handlers.end); c.removeEventListener('mouseleave', graphState.handlers.end); }
+            const gp = (e) => { const r = s.getBoundingClientRect(), vb = s.viewBox.baseVal, sx = vb.width / r.width, sy = vb.height / r.height; let cx = e.clientX, cy = e.clientY; if (e.type.includes('touch') && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; } return { x: (cx - r.left) * sx - m.left, y: (cy - r.top) * sy - m.top }; };
+            const f = (x, y, st = null) => { const sl = st ? `.g-point-group[data-stat="${st}"]` : '.g-point-group', grs = c.querySelectorAll(sl); let min = Infinity, cl = null; grs.forEach(g => { const gx = parseFloat(g.getAttribute('data-cx')), gy = parseFloat(g.getAttribute('data-cy')), d = Math.sqrt(Math.pow(gx - x, 2) + (st ? 0 : Math.pow(gy - y, 2))); if (d < min) { min = d; cl = g; } }); return { g: cl, d: min }; };
+            const uh = (g) => { c.querySelectorAll('.g-point-group.active').forEach(z => z.classList.remove('active')); g.classList.add('active'); TooltipController.show(g.getAttribute('data-tooltip-html'), g.getBoundingClientRect()); };
+            const ch = () => { c.querySelectorAll('.g-point-group.active').forEach(z => z.classList.remove('active')); TooltipController.hide(); };
+            const os = (e) => { if (e.type === 'touchstart' && e.target.closest('.g-hud')) return; if (e.type === 'touchstart') e.preventDefault(); const p = gp(e), cl = f(p.x, p.y); if (cl.g && cl.d < 15) { graphState.isDragging = true; graphState.lockedStat = cl.g.getAttribute('data-stat'); uh(cl.g); } };
+            const om = (e) => { if (e.type === 'touchmove') e.preventDefault(); const p = gp(e); if (graphState.isDragging && graphState.lockedStat) { const m = f(p.x, p.y, graphState.lockedStat); if (m.g) uh(m.g); } else { const cl = f(p.x, p.y); if (cl.g && cl.d < 30) uh(cl.g); else ch(); } };
+            const oe = () => { graphState.isDragging = false; graphState.lockedStat = null; };
+            graphState.handlers = { start: os, scrub: om, end: oe }; c.addEventListener('mousedown', os); c.addEventListener('mousemove', om); window.addEventListener('mouseup', oe); c.addEventListener('touchstart', os, { passive: false }); c.addEventListener('touchmove', om, { passive: false }); window.addEventListener('touchend', oe); c.addEventListener('mouseleave', ch);
+        },
+
+        setupControls() {
+            document.querySelectorAll('.g-pill').forEach(b => { b.onclick = (e) => { e.stopPropagation(); const t = b.getAttribute('data-type'), v = b.getAttribute('data-val'); if (t === 'mode') { document.querySelectorAll('.g-pill[data-type="mode"]').forEach(x => x.classList.remove('active')); b.classList.add('active'); graphState.mode = v; viewState.graphMode = v; } else if (t === 'stat') { if (graphState.activeStats.includes(v)) { graphState.activeStats = graphState.activeStats.filter(s => s !== v); b.classList.remove('active'); } else { graphState.activeStats.push(v); b.classList.add('active'); } viewState.graphStats = graphState.activeStats; } saveViewState(); GraphController.draw(); } });
+            runtime.resizeObserver = new ResizeObserver(() => { if (dom.topPanel && dom.topPanel.classList.contains('viewing-graph')) window.requestAnimationFrame(GraphController.draw); }); runtime.resizeObserver.observe(dom.graphContainer);
+        },
+
+        restoreUi() { document.querySelectorAll('.g-pill[data-type="mode"]').forEach(b => { if (b.getAttribute('data-val') === graphState.mode) b.classList.add('active'); else b.classList.remove('active'); }); document.querySelectorAll('.g-pill[data-type="stat"]').forEach(b => { if (graphState.activeStats.includes(b.getAttribute('data-val'))) b.classList.add('active'); else b.classList.remove('active'); }); }
+    };
+
+    /**
+     *  [SECTION VIII] THE GAINS (Sticker Engine)
+     *  ========================================================================
+     *  The payoff. Shiny trophies and spinning things. Because numbers are
+     *  boring without a little flex.
+     */
+
+    function loadStickerData() { DataController.getStickerMap(); const unlocked = runtime.demoMode ? 1 : (DataController._cache.unlockedCount || 1); const it = []; for (let i = 1; i <= 50; i++) { const c = CUSTOM_STICKERS.find(s => s.id === i); if (c) it.push({ type: 'image', ...c, unlocked: i <= unlocked }); else it.push({ id: i, name: `Sticker Slot ${i}`, type: 'image', url: DEFAULT_STICKER_URL, unlocked: false }); } runtime.stickerData = it; }
+    function renderStickers() {
+        if (!runtime.stickerData.length) loadStickerData();
+        const dc = dom.stickerPagination, te = dom.stickerTitle; if (te) te.innerText = PAGE_TITLES[runtime.currentStickerPage] || "";
+        const tp = Math.ceil(runtime.stickerData.length / 10), pb = dom.stickerPrev, nb = dom.stickerNext;
+        if (pb) { if (runtime.currentStickerPage === 0) pb.classList.add('disabled'); else pb.classList.remove('disabled'); } if (nb) { if (runtime.currentStickerPage >= tp - 1) nb.classList.add('disabled'); else nb.classList.remove('disabled'); }
+        if (dc) { dc.innerHTML = ''; for (let i = 0; i < tp; i++) { const d = document.createElement('div'); d.className = `pg-dot ${i === runtime.currentStickerPage ? 'active' : ''}`; d.onclick = () => { runtime.currentStickerPage = i; renderStickers(); }; dc.appendChild(d); } }
+        const start = runtime.currentStickerPage * 10, pi = runtime.stickerData.slice(start, start + 10);
+        if (runtime.stickerSlots.length === 0) return;
+        let comingSoonDiv = document.getElementById('bbgl-coming-soon');
+        if (runtime.currentStickerPage >= 2) {
+            for (let i = 0; i < 10; i++) runtime.stickerSlots[i].style.display = 'none';
+            if (!comingSoonDiv) {
+                const g = document.getElementById('bbgl-sticker-grid') || dom.stickerGrid;
+                if (g) {
+                    const cs = document.createElement('div'); cs.id = 'bbgl-coming-soon'; cs.className = 'bbgl-coming-soon'; cs.innerHTML = 'Cumming<br>Soon...'; g.appendChild(cs);
+                }
+            } else comingSoonDiv.style.display = 'block';
+        } else {
+            if (comingSoonDiv) comingSoonDiv.style.display = 'none';
+            for (let i = 0; i < 10; i++) {
+                const sl = runtime.stickerSlots[i], img = sl.querySelector('.sticker-img'), it = pi[i];
+                sl.style.display = '';
+                if (it) { sl.className = 'sticker-slot active-slot'; if (it.unlocked) { sl.classList.add('has-item'); sl.classList.remove('locked'); sl.setAttribute('data-tooltip', `${it.name}`); sl.onclick = () => openItemViewer(it); } else { sl.classList.add('has-item', 'locked'); sl.setAttribute('data-tooltip', TOOLTIPS.LOCKED); sl.onclick = null; } if (img.src !== it.url) img.src = it.url; } else { sl.className = 'sticker-slot'; sl.onclick = null; }
+            }
+        }
+    }
+    function animateViewer(ts) {
+        if (document.hidden || runtime.currentOpenedItemId === null || viewState.subView !== 'stickers' && viewState.subView !== 'viewer' && runtime.currentOpenedItemId === null) { if (runtime.viewerLoopId) cancelAnimationFrame(runtime.viewerLoopId); runtime.viewerLoopId = null; return; }
+        if (!runtime.lastFrameTime) runtime.lastFrameTime = ts; const el = ts - runtime.lastFrameTime;
+        if (el > 17) {
+            runtime.lastFrameTime = ts - (el % 17); const ped = dom.viPedestal, obj = dom.viObj;
+            if (ped && obj) {
+                runtime.viewerRotation += runtime.viewerSpeed; ped.style.transform = `rotateY(${runtime.viewerRotation}deg) translateZ(0)`;
+                if (obj.classList.contains('is-image')) {
+                    const rad = (runtime.viewerRotation * Math.PI) / 180, br = (0.7 + (Math.sin(rad) * 0.3)).toFixed(2), isF = Math.cos(rad) > -0.2 ? 1 : 0;
+                    obj.style.setProperty('--sheen-pos', (runtime.viewerRotation * 2.5) + '% 0%'); obj.style.setProperty('--back-brightness', br); obj.style.setProperty('--sheen-opacity', isF);
+                }
+            }
+        } runtime.viewerLoopId = requestAnimationFrame(animateViewer);
+    }
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && runtime.currentOpenedItemId !== null) { if (runtime.viewerLoopId) cancelAnimationFrame(runtime.viewerLoopId); animateViewer(); } });
+    function openItemViewer(it, sv = true) {
+        if (runtime.currentOpenedItemId === it.id) return; if (sv) { viewState.activeItemId = it.id; saveViewState(); }
+        TooltipController.hide();
+        const v = dom.itemViewer, bp = dom.bottomPanel, nm = dom.viName, ob = dom.viObj, lf = ob.querySelector('.layer-front'), lb = ob.querySelector('.layer-back'), st = document.querySelector('.viewer-stage');
+        runtime.currentOpenedItemId = it.id; bp.style.setProperty('display', 'none', 'important'); v.classList.add('active'); v.style.setProperty('display', 'flex', 'important');
+        let ped = dom.viPedestal; if (!ped) { ped = document.createElement('div'); ped.id = 'vi-pedestal-wrapper'; ped.className = 'viewer-pedestal'; st.appendChild(ped); ped.appendChild(ob); dom.viPedestal = ped; }
+        nm.innerText = it.name; if (it.type === 'image') { ob.classList.add('is-image'); ob.style.setProperty('--bg-mask', `url('${it.url}')`); if (lf) lf.style.backgroundImage = `url('${it.url}')`; if (lb) { lb.style.webkitMaskImage = `url('${it.url}')`; lb.style.maskImage = `url('${it.url}')`; } }
+        runtime.viewerRotation = 0; runtime.viewerSpeed = 0.3; if (runtime.viewerLoopId) cancelAnimationFrame(runtime.viewerLoopId); requestAnimationFrame(animateViewer);
+        const spdUp = () => { runtime.viewerSpeed = 3; }; const spdDn = () => { runtime.viewerSpeed = 0.3; };
+        st.onmousedown = spdUp; st.ontouchstart = spdUp; st.onmouseup = spdDn; st.onmouseleave = spdDn; st.ontouchend = spdDn; st.ontouchcancel = spdDn;
+    }
+    function closeItemViewer(sv = true) {
+        if (sv) { viewState.activeItemId = null; saveViewState(); }
+        runtime.currentOpenedItemId = null; if (runtime.viewerLoopId) { cancelAnimationFrame(runtime.viewerLoopId); runtime.viewerLoopId = null; }
+        const v = dom.itemViewer, bp = dom.bottomPanel;
+        if (v) { v.classList.remove('active'); v.style.setProperty('display', 'none', 'important'); } if (bp) { bp.style.removeProperty('display'); if (getComputedStyle(bp).display === 'none') bp.style.display = 'flex'; }
+    }
+    function setupStickerGrid() {
+        const g = dom.stickerGrid; if (!g) return;
+        runtime.stickerSlots = []; g.innerHTML = ''; for (let i = 0; i < 10; i++) { const s = document.createElement('div'); s.className = 'sticker-slot'; const m = document.createElement('img'); m.className = 'sticker-img'; s.appendChild(m); g.appendChild(s); runtime.stickerSlots.push(s); } renderStickers();
+    }
+
+    /**
+     *  [SECTION IX] THE MOTIVATION (Controller Layer)
+     *  ========================================================================
+     *  The drive. The ghost in the machine that gets your ass in the gym and
+     *  keeps the system moving.
+     */
+
+    function handleGymClick(e) {
+        const b = e.target.closest('button');
+        if (!b) return;
+
+        const l = b.getAttribute('aria-label');
+        if (!l) return;
+
+        let id = null;
+        if (l === 'Train strength') id = 5300;
+        else if (l === 'Train defense') id = 5301;
+        else if (l === 'Train speed') id = 5302;
+        else if (l === 'Train dexterity') id = 5303;
+
+        if (id) {
+            // Drop the session flag for the "Leaving the Gym" full sync
+            sessionStorage.setItem(KEYS.SESSION, 'true');
+
+            // Ensure our timers object exists in the runtime state
+            if (!runtime.trainDebouncers) runtime.trainDebouncers = {};
+
+            // Cancel ONLY the timer for the specific stat that was just clicked
+            if (runtime.trainDebouncers[id]) {
+                clearTimeout(runtime.trainDebouncers[id]);
+            }
+
+            // Start a fresh 5-second timer for this specific stat
+            runtime.trainDebouncers[id] = setTimeout(() => {
+
+                // Fire the fetch for this specific stat
+                universalFetch('TRAIN_SINGLE', { specId: id });
+
+                // Clear the timer from memory once it's done
+                runtime.trainDebouncers[id] = null;
+
+            }, 5000);
+        }
+    }
+    function updateCellSelection(newLabel) {
+        const c = dom.calContainer; if (!c) return;
+        c.querySelectorAll('.bbgl-day-cell.is-viewing').forEach(el => {
+            el.classList.remove('is-viewing');
+            if (!el.matches(':hover')) el.classList.remove('shimmer-active');
+        });
+        c.querySelectorAll('.bbgl-weekly-track.is-viewing').forEach(el => el.classList.remove('is-viewing'));
+        if (!newLabel) {
+            const today = document.getElementById('active-date-today');
+            if (today) today.classList.add('is-viewing');
+            return;
+        }
+        const dayCell = c.querySelector(`.bbgl-day-cell[data-date="${newLabel}"]`);
+        if (dayCell) { dayCell.classList.add('is-viewing'); if (userConfig.animations && !dayCell.classList.contains('shimmer-active')) dayCell.classList.add('shimmer-active'); return; }
+        const track = c.querySelector(`.bbgl-weekly-track[data-label="${newLabel}"]`);
+        if (track) track.classList.add('is-viewing');
+    }
+    function openHistory(d, l) {
+        if (runtime.isViewAnimating) { dom.ledgerView.classList.remove('bbgl-crt-out', 'bbgl-crt-in'); runtime.isViewAnimating = false; }
+        viewState.activeViewLabel = l; saveViewState(); if (calendarState.selectedLabel === l && !dom.topPanel.classList.contains('viewing-graph')) return;
+        runtime.isViewAnimating = true; calendarState.selectedData = d; calendarState.selectedLabel = l; closeItemViewer();
+        updateCellSelection(l);
+        const tp = dom.topPanel;
+        if (tp.classList.contains('viewing-stickers')) { switchView('ledger'); setTimeout(() => { renderStats(d, l); }, 300); return; }
+        if (tp.classList.contains('viewing-graph')) { GraphController.draw(); const de = dom.dateLabel; if (de) de.innerText = Formatter.datePretty(l) || l; runtime.isViewAnimating = false; }
+        else { const el = dom.ledgerView; if (userConfig.animations) { el.classList.add('bbgl-crt-out'); setTimeout(() => { el.classList.remove('bbgl-crt-out'); renderStats(d, l); el.classList.add('bbgl-crt-in'); setTimeout(() => { el.classList.remove('bbgl-crt-in'); runtime.isViewAnimating = false; }, 300); }, 280); } else { renderStats(d, l); runtime.isViewAnimating = false; } }
+    }
+    function closeHistory(e) {
+        if (e) e.stopPropagation(); if (!calendarState.selectedData) return;
+        if (runtime.isViewAnimating) { dom.ledgerView.classList.remove('bbgl-crt-out', 'bbgl-crt-in'); runtime.isViewAnimating = false; }
+        viewState.activeViewLabel = null; saveViewState(); runtime.isViewAnimating = true; calendarState.selectedData = null; calendarState.selectedLabel = null;
+        updateCellSelection(null);
+        const tp = dom.topPanel, ts = Formatter.dateLogical();
+        if (tp.classList.contains('viewing-graph')) { GraphController.draw(); const de = dom.dateLabel; if (de) de.innerText = Formatter.datePretty(ts) || ts; runtime.isViewAnimating = false; }
+        else if (tp.classList.contains('viewing-stickers')) runtime.isViewAnimating = false;
+        else { const el = dom.ledgerView; if (userConfig.animations) { el.classList.add('bbgl-crt-out'); setTimeout(() => { el.classList.remove('bbgl-crt-out'); renderStats(getActiveHistory().today, ts); el.classList.add('bbgl-crt-in'); setTimeout(() => { el.classList.remove('bbgl-crt-in'); runtime.isViewAnimating = false; }, 300); }, 280); } else { renderStats(getActiveHistory().today, ts); runtime.isViewAnimating = false; } }
+    }
+    function changeMonth(d) { const c = dom.calContainer; if (!c) return; c.parentElement.querySelectorAll('.bbgl-cal-ghost').forEach(g => g.remove()); const ghost = c.cloneNode(true); ghost.className += ' bbgl-cal-ghost'; ghost.style.animation = d > 0 ? 'bbgl-slide-out-l 0.3s ease forwards' : 'bbgl-slide-out-r 0.3s ease forwards'; c.parentElement.appendChild(ghost); const removeGhost = () => { if (ghost.parentElement) ghost.remove(); }; ghost.addEventListener('animationend', removeGhost, { once: true }); const ghostTimer = setTimeout(removeGhost, 400); ghost.addEventListener('animationend', () => clearTimeout(ghostTimer), { once: true }); let m = calendarState.month + d, y = calendarState.year; if (m > 11) { m = 0; y++; } if (m < 0) { m = 11; y--; } calendarState.month = m; calendarState.year = y; viewState.calYear = y; viewState.calMonth = m; saveViewState(); c.style.willChange = 'transform'; renderPanelContent(); c.style.animation = d > 0 ? 'bbgl-slide-in-r 0.3s ease forwards' : 'bbgl-slide-in-l 0.3s ease forwards'; c.addEventListener('animationend', () => { c.style.animation = ''; c.style.willChange = 'auto'; }, { once: true }); }
+    function changeStickerPage(d) {
+        if (!userConfig.animations) {
+            viewState.currentStickerPage += d;
+            runtime.currentStickerPage = viewState.currentStickerPage;
+            saveViewState();
+            renderStickers();
+            return;
+        }
+        const c = dom.stickerGrid; if (!c) return;
+        const bg = dom.stickerBg;
+        const ghost = c.cloneNode(true);
+        ghost.className += ' bbgl-cal-ghost';
+        ghost.style.pointerEvents = 'none';
+        ghost.style.zIndex = '5';
+        ghost.style.animation = d > 0 ? 'bbgl-slide-out-l 0.3s ease forwards' : 'bbgl-slide-out-r 0.3s ease forwards';
+        c.parentElement.appendChild(ghost);
+        ghost.addEventListener('animationend', () => ghost.remove(), { once: true });
+        if (bg) {
+            const bgGhost = bg.cloneNode(true);
+            bgGhost.style.pointerEvents = 'none';
+            bgGhost.style.animation = d > 0 ? 'bbgl-slide-out-l 0.3s ease forwards' : 'bbgl-slide-out-r 0.3s ease forwards';
+            bg.parentElement.appendChild(bgGhost);
+            bgGhost.addEventListener('animationend', () => bgGhost.remove(), { once: true });
+        }
+        viewState.currentStickerPage += d;
+        runtime.currentStickerPage = viewState.currentStickerPage;
+        saveViewState();
+        renderStickers();
+        c.style.animation = d > 0 ? 'bbgl-slide-in-r 0.3s ease forwards' : 'bbgl-slide-in-l 0.3s ease forwards';
+        c.addEventListener('animationend', () => c.style.animation = '', { once: true });
+        if (bg) {
+            bg.style.animation = d > 0 ? 'bbgl-slide-in-r 0.3s ease forwards' : 'bbgl-slide-in-l 0.3s ease forwards';
+            bg.addEventListener('animationend', () => bg.style.animation = '', { once: true });
+        }
+    }
+    function toggleMonthDropdown() {
+        const d = dom.monthDropdown; dom.yearDropdown.classList.remove('show'); d.innerHTML = '';
+        CONSTANTS.MONTHS_SHORT.forEach((m, i) => { const x = document.createElement('div'); x.className = `drop-item ${i === calendarState.month ? 'active' : ''}`; x.textContent = m; x.onclick = () => { calendarState.month = i; renderPanelContent(); }; d.appendChild(x); }); d.classList.toggle('show');
+    }
+    function toggleYearDropdown() {
+        const d = dom.yearDropdown; dom.monthDropdown.classList.remove('show'); d.innerHTML = '';
+        const s = getActiveHistory(), ys = new Set(); s.history.forEach(z => ys.add(parseInt(z.date.split('-')[0]))); if (s.today.date) ys.add(parseInt(s.today.date.split('-')[0]));
+        Array.from(ys).sort().reverse().forEach(y => { const x = document.createElement('div'); x.className = `drop-item ${y === calendarState.year ? 'active' : ''}`; x.textContent = y; x.onclick = () => { calendarState.year = y; renderPanelContent(); }; d.appendChild(x); }); d.classList.toggle('show');
+    }
+    function calcAllTimeStats() {
+        const sl = DataController.getSlice('ALL', 'All-Time');
+        openHistory(sl, 'All-Time');
+    }
+    function calcPeriodStats(t) { const lbl = (t === 'month') ? CONSTANTS.MONTHS[calendarState.month] : String(calendarState.year), m = (t === 'month') ? 'MONTH' : 'YEAR', sl = DataController.getSlice(m, lbl, calendarState.year); openHistory(sl, lbl); }
+    function checkViewRouting() {
+        const pm = window.location.hash.includes('gymlog'); syncSidebarState();
+        if (pm) { document.title = "Gym Log | TORN"; document.body.classList.add('bbgl-page-mode-active'); renderPageMode(); }
+        else {
+            document.body.classList.remove('bbgl-page-mode-active'); const cw = document.querySelector('.content-wrapper'); if (cw && document.getElementById('bbgl-page-container')) document.getElementById('bbgl-page-container').remove();
+            if (viewState.isOpen) { const lp = dom.panel; if (lp && lp.classList.contains('bbgl-mode-page')) { lp.remove(); dom.panel = null; } togglePanel(false); }
+            else { viewState.subView = 'ledger'; viewState.activeItemId = null; viewState.activeViewLabel = null; viewState.isTall = false; calendarState.selectedData = null; calendarState.selectedLabel = null; }
+        }
+    }
+    function renderPageMode() {
+        const H = `<div class="bbgl-native-header"><div class="bbgl-native-title"><span style="margin-left:8px;">Big Black Gym Log</span></div><div class="bbgl-native-links"><div id="bbgl-page-settings" class="bbgl-native-link"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.58 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.08-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>Settings</div></div></div>`;
+        const cw = document.querySelector('.content-wrapper'); if (!cw) return; window.scrollTo(0, 0);
+        const pp = dom.panel; if (pp && !pp.classList.contains('bbgl-mode-page')) { pp.remove(); dom.panel = null; } if (document.getElementById('bbgl-page-container')) return;
+        cw.innerHTML = ''; const pc = document.createElement('div'); pc.id = 'bbgl-page-container'; const mob = window.innerWidth < 800; if (mob) pc.classList.add('mobile-mode');
+        pc.innerHTML = H; const sb = pc.querySelector('#bbgl-page-settings'); if (sb) sb.onclick = toggleSettingsView;
+        const p = document.createElement('div'); p.id = 'bbgl-panel'; p.className = 'bbgl-mode-page bbgl-expanded bbgl-tall'; if (mob) p.classList.add('mobile-mode'); p.innerHTML = getDashboardHTML(); pc.appendChild(p); cw.appendChild(pc);
+        setupEventListeners(p); restoreInternalState(); renderPanelContent(); if (dom.topPanel.classList.contains('viewing-graph')) setTimeout(GraphController.draw, 100);
+    }
+    function togglePanel(click = false) {
+        if (window.location.hash.includes('gymlog')) return;
+        let p = document.getElementById('bbgl-panel'); const b = dom.gymTab;
+        if (click && p && p.style.display !== 'none') { closePanel(); return; }
+        if (!p) { p = document.createElement('div'); p.id = 'bbgl-panel'; if (viewState.expanded) p.classList.add('bbgl-expanded'); if (viewState.isTall) p.classList.add('bbgl-tall'); p.innerHTML = getDashboardHTML(); document.body.appendChild(p); setupEventListeners(p); }
+        if (p.style.display === 'none' || !p.style.display) { restoreInternalState(); p.style.opacity = '0'; p.style.display = 'flex'; handleLayout(); void p.offsetWidth; updateTransformOrigin(); if (b) b.classList.add('bbgl-tab-active'); p.classList.remove('bbgl-animate-vanish', 'bbgl-animate-pop'); void p.offsetWidth; p.classList.add('bbgl-animate-pop'); p.style.opacity = ''; if (click) { viewState.isOpen = true; saveViewState(); } } else if (click) closePanel();
+    }
+    function restoreInternalState() {
+        const mp = dom.panel; if (viewState.calYear && viewState.calMonth !== undefined && viewState.calMonth !== null) { calendarState.year = viewState.calYear; calendarState.month = viewState.calMonth; }
+        if (viewState.currentStickerPage !== undefined) runtime.currentStickerPage = viewState.currentStickerPage;
+        if (viewState.graphMode) graphState.mode = (viewState.graphMode === 'gains' ? 'values' : viewState.graphMode) || 'values';
+        if (viewState.graphStats) graphState.activeStats = viewState.graphStats;
+        if (viewState.activeViewLabel) { const s = getActiveHistory(); let td = null; if (/^\d{4}-\d{2}-\d{2}$/.test(viewState.activeViewLabel)) { td = s.history.find(d => d.date === viewState.activeViewLabel); if (!td && s.today.date === viewState.activeViewLabel) td = s.today; if (td) { calendarState.selectedData = td; calendarState.selectedLabel = viewState.activeViewLabel; renderStats(td, viewState.activeViewLabel); } } else { const mn = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]; if (mn.includes(viewState.activeViewLabel)) calcPeriodStats('month'); else if (/^\d{4}$/.test(viewState.activeViewLabel)) calcPeriodStats('year'); } }
+        renderPanelContent(); const et = () => { if (mp && !mp.classList.contains('bbgl-mode-page') && !mp.classList.contains('bbgl-tall')) { mp.classList.add('bbgl-tall'); const t = dom.tallToggle; if (t) t.innerText = "–"; viewState.isTall = true; saveViewState(); } };
+        const _hasData = _historyCache && (_historyCache.history.length > 0 || (_historyCache.meta && _historyCache.meta.logStartDate));
+        if (viewState.subView === 'settings') switchView('settings', true); else if (viewState.subView === 'welcome' || (!runtime.demoMode && !_hasData && !localStorage.getItem('bbgl_initialized'))) { switchView('welcome', true); } else if (viewState.subView === 'graph') { et(); switchView('graph', true); setTimeout(() => window.requestAnimationFrame(() => GraphController.draw()), 350); } else if (viewState.subView === 'stickers') { et(); if (!runtime.stickerData || runtime.stickerData.length === 0) loadStickerData(); let ti = Number(viewState.activeItemId); if (!ti || ti < 1) { ti = 1; viewState.activeItemId = 1; saveViewState(); } switchView('stickers', true); const i = runtime.stickerData.find(x => x.id === ti); if (i) { const bp = dom.bottomPanel; if (bp) bp.style.setProperty('display', 'none', 'important'); setTimeout(() => openItemViewer(i, false), 50); } } else if (viewState.subView === 'achievements') { et(); switchView('achievements', true); } else switchView('ledger', true);
+    }
+    function switchView(tgt, inst = false) {
+        const tp = dom.topPanel, bp = dom.bottomPanel, sp = dom.settingsView, vp = dom.itemViewer, wv = dom.welcomeView;
+        let cm = 'ledger'; if (wv && wv.classList.contains('active-view')) cm = 'welcome'; else if (sp.classList.contains('active-view')) cm = 'settings'; else if (tp.classList.contains('viewing-graph')) cm = 'graph'; else if (tp.classList.contains('viewing-stickers')) cm = 'stickers'; else if (tp.classList.contains('viewing-achievements')) cm = 'achievements';
+        if (cm === tgt && !inst) return; viewState.subView = tgt; saveViewState();
+        runtime.currentOpenedItemId = null; if (runtime.viewerLoopId) { cancelAnimationFrame(runtime.viewerLoopId); runtime.viewerLoopId = null; }
+        const gel = (m) => { if (m === 'settings') return sp; if (m === 'welcome') return wv; if (m === 'graph') return dom.graphContainer; if (m === 'stickers') return dom.stickerContainer; if (m === 'achievements') return dom.achievementsContainer; return dom.ledgerView; };
+        const cel = gel(cm), nel = gel(tgt);
+        const app = () => {
+            tp.classList.remove('viewing-graph', 'viewing-stickers', 'viewing-achievements'); sp.classList.remove('active-view'); if (wv) wv.classList.remove('active-view'); tp.style.display = 'flex'; bp.style.removeProperty('display'); if (getComputedStyle(bp).display === 'none') bp.style.display = 'flex'; vp.classList.remove('active'); vp.style.setProperty('display', 'none', 'important');
+            if (tgt === 'welcome') {
+                if (wv) {
+                    wv.innerHTML = getWelcomeHTML(); wv.classList.add('active-view');
+                    const cwb = wv.querySelector('.close-settings-btn');
+                    if (cwb) cwb.onclick = (e) => {
+                        if (e) e.stopPropagation();
+                        if (runtime.welcomeReturn === 'settings') {
+                            runtime.welcomeReturn = null;
+                            switchView('settings');
+                        } else {
+                            switchView('ledger');
+                        }
+                    };
+                    // --- Wire welcome page init controls ---
+                    const iak = wv.querySelector('#init-api-key');
+                    if (iak) iak.value = userConfig.apiKey || '';
+
+                    const iwp = wv.querySelector('#init-api-paste');
+                    if (iwp && iak) iwp.onclick = async () => { try { const t = await navigator.clipboard.readText(); if (t) iak.value = t.trim(); } catch (e) { alert("Clipboard access denied. Please paste manually."); } };
+
+                    const ilocSel = wv.querySelector('#init-loc-select');
+                    if (ilocSel) { ilocSel.value = userConfig.buttonLocation; ilocSel.onchange = () => onChangeLoc(ilocSel.value); }
+                    const idaySel = wv.querySelector('#init-day-start');
+                    if (idaySel) { idaySel.value = userConfig.dayStartMode; idaySel.onchange = () => onChangeDayStart(idaySel.value); }
+                    const iweekSel = wv.querySelector('#init-week-start');
+                    if (iweekSel) { iweekSel.value = userConfig.weekStartMode; iweekSel.onchange = () => onChangeWeekStart(iweekSel.value); }
+
+                    const ipb = wv.querySelector('#init-privacy-btn');
+                    if (ipb) ipb.onclick = function () { this.blur(); openPrivacyModal(); };
+
+                    const isb = wv.querySelector('#init-start-btn');
+                    if (isb && iak) isb.onclick = async function () {
+                        this.blur();
+                        const v = iak.value.trim();
+                        if (!/^[a-zA-Z0-9]{16}$/.test(v)) { alert("Invalid Format.\nA Torn API Key must be exactly 16 alphanumeric characters."); return; }
+                        isb.style.color = '#69f0ae'; isb.innerText = 'VERIFYING...'; isb.disabled = true;
+                        try {
+                            const res = await fetch(`https://api.torn.com/user/?selections=battlestats,log&log=5300&key=${v}`);
+                            const data = await res.json();
+                            if (data.error) {
+                                alert(`Key Verification Failed: ${data.error.error}\n\nPlease generate a key properly configured with 'battlestats' and 'log' access.`);
+                                isb.style.color = ''; isb.innerText = 'START TRACKING'; isb.disabled = false;
+                                return;
+                            }
+                            userConfig.apiKey = v; saveConfig();
+                            localStorage.setItem('bbgl_initialized', '1');
+                            refreshInitLock();
+                            calendarState.selectedData = null;
+                            calendarState.selectedLabel = Formatter.dateLogical();
+                            viewState.activeViewLabel = null;
+                            switchView('ledger');
+                            syncWithFeedback('FULL_SYNC');
+                        } catch (e) {
+                            alert("Network error during verification.");
+                            isb.style.color = ''; isb.innerText = 'START TRACKING'; isb.disabled = false;
+                        }
+                    };
+
+                    const cb = wv.querySelector('#init-create-api-btn');
+                    if (cb) cb.onclick = function () { this.blur(); window.open('https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=BBGymLog&user=battlestats,log', '_blank'); };
+
+                    const rib = wv.querySelector('#init-returning-import-btn');
+                    const rif = wv.querySelector('#init-import-file');
+                    if (rib && rif) rib.onclick = function () { this.blur(); rif.click(); };
+                    if (rif) rif.onchange = (e) => { const f = e.target.files[0]; if (f) importDataFromWelcome(f); };
+
+                    refreshInitMask(wv);
+                    // --- End welcome page init controls ---
+                } tp.style.display = 'none'; bp.style.display = 'none';
+            }
+            else if (tgt === 'settings') { sp.classList.add('active-view'); tp.style.display = 'none'; bp.style.display = 'none'; const ki = document.getElementById('set-api-key'); if (ki) ki.value = userConfig.apiKey || ''; const at = document.getElementById('set-anim-toggle'); if (at) at.checked = userConfig.animations; const rt = document.getElementById('set-rate-toggle'); if (rt) rt.checked = userConfig.ratesEnabled; const ls = document.getElementById('set-loc-select'); if (ls) ls.value = userConfig.buttonLocation; refreshDemoMasks(); }
+            else if (tgt === 'graph') { tp.classList.add('viewing-graph'); GraphController.restoreUi(); GraphController.draw(); } else if (tgt === 'stickers') { tp.classList.add('viewing-stickers'); renderStickers(); } else if (tgt === 'achievements') { tp.classList.add('viewing-achievements'); } else renderPanelContent();
+        };
+        if (inst) { app(); return; } if (runtime.isViewAnimating) { cel.classList.remove('bbgl-crt-out', 'bbgl-crt-in'); nel.classList.remove('bbgl-crt-out', 'bbgl-crt-in'); runtime.isViewAnimating = false; } runtime.isViewAnimating = true;
+        if (!userConfig.animations) { app(); runtime.isViewAnimating = false; }
+        else if (cm === 'settings') { app(); nel.classList.add('bbgl-crt-in'); setTimeout(() => { nel.classList.remove('bbgl-crt-in'); runtime.isViewAnimating = false; }, 300); }
+        else if (tgt === 'settings') { cel.classList.add('bbgl-crt-out'); setTimeout(() => { cel.classList.remove('bbgl-crt-out'); app(); runtime.isViewAnimating = false; }, 280); }
+        else if (tgt === 'stickers') { cel.classList.add('bbgl-crt-out'); setTimeout(() => { cel.classList.remove('bbgl-crt-out'); app(); runtime.isViewAnimating = false; }, 280); }
+        else if (cm === 'stickers') { nel.classList.add('bbgl-crt-in'); app(); setTimeout(() => { nel.classList.remove('bbgl-crt-in'); runtime.isViewAnimating = false; }, 300); }
+        else { cel.classList.add('bbgl-crt-out'); setTimeout(() => { cel.classList.remove('bbgl-crt-out'); nel.classList.add('bbgl-crt-in'); app(); setTimeout(() => { nel.classList.remove('bbgl-crt-in'); runtime.isViewAnimating = false; }, 300); }, 280); }
+    }
+    function closePanel(e) {
+        if (e) e.stopPropagation(); if (runtime.isClosing) return;
+        const p = dom.panel, b = dom.gymTab; if (!p) return;
+        runtime.isClosing = true; viewState.isOpen = false; viewState.isTall = false; viewState.subView = 'ledger'; viewState.activeViewLabel = null; const _n = TimeManager.now(); viewState.calYear = _n.year; viewState.calMonth = _n.month; saveViewState();
+        const sp = dom.settingsView, tp = dom.topPanel, bp = dom.bottomPanel, wv = dom.welcomeView;
+        if (sp) sp.classList.remove('active-view');
+        if (wv) wv.classList.remove('active-view');
+        if (tp) { tp.style.display = 'flex'; tp.classList.remove('viewing-graph', 'viewing-stickers'); }
+        if (bp) bp.style.display = 'flex';
+        closeItemViewer(false); calendarState.year = viewState.calYear; calendarState.month = viewState.calMonth; calendarState.selectedData = null; calendarState.selectedLabel = null; renderPanelContent();
+        if (b) b.classList.remove('bbgl-tab-active'); updateTransformOrigin(); p.classList.remove('bbgl-animate-pop'); p.classList.add('bbgl-animate-vanish'); p.classList.remove('bbgl-tall');
+        const tt = dom.tallToggle; if (tt) tt.innerText = "+";
+        setTimeout(() => { p.style.display = 'none'; p.classList.remove('bbgl-animate-vanish'); runtime.isClosing = false; handleLayout(); }, 300);
+    }
+    function toggleTall() {
+        const p = dom.panel, b = dom.tallToggle; p.classList.toggle('bbgl-tall'); const t = p.classList.contains('bbgl-tall'); b.innerText = t ? "–" : "+"; viewState.isTall = t; saveViewState();
+        const tp = dom.topPanel; if (!t) { if (tp.classList.contains('viewing-graph') || tp.classList.contains('viewing-stickers')) switchView('ledger'); } else { if (tp.classList.contains('viewing-graph')) { GraphController.draw(); setTimeout(GraphController.draw, 320); } }
+    }
+    function toggleLedgerView() { switchView('ledger'); saveViewState(); }
+    function toggleGraphView() { switchView('graph'); saveViewState(); }
+    function toggleStickerView() {
+        const mp = dom.panel, tb = dom.tallToggle;
+        if (!viewState.isTall) { viewState.isTall = true; if (mp) mp.classList.add('bbgl-tall'); if (tb) tb.innerText = "–"; } if (!viewState.activeItemId) viewState.activeItemId = 1; switchView('stickers'); setTimeout(() => { if (!runtime.stickerData.length) loadStickerData(); const i = runtime.stickerData.find(x => x.id === (viewState.activeItemId || 1)); if (i) openItemViewer(i, true); }, 400); saveViewState();
+    }
+    function toggleAchievementsView() {
+        const mp = dom.panel, tb = dom.tallToggle;
+        if (!viewState.isTall) { viewState.isTall = true; if (mp) mp.classList.add('bbgl-tall'); if (tb) tb.innerText = "–"; } switchView('achievements'); saveViewState();
+    }
+    function toggleSettingsView(e) {
+        if (e) e.stopPropagation(); const sp = dom.settingsView, tp = dom.topPanel, vp = dom.itemViewer;
+        if (sp.classList.contains('active-view')) { let t = runtime.returnView || 'ledger'; if (t === 'viewer') { switchView('stickers'); viewState.subView = 'stickers'; if (viewState.activeItemId) setTimeout(() => { if (!runtime.stickerData.length) loadStickerData(); const i = runtime.stickerData.find(x => x.id === viewState.activeItemId); if (i) openItemViewer(i, false); }, 50); } else { switchView(t); viewState.subView = t; } }
+        else { if (vp && vp.classList.contains('active')) runtime.returnView = 'viewer'; else if (tp.classList.contains('viewing-graph')) runtime.returnView = 'graph'; else if (tp.classList.contains('viewing-stickers')) runtime.returnView = 'stickers'; else runtime.returnView = 'ledger'; switchView('settings'); viewState.subView = 'settings'; } saveViewState();
+    }
+    function updateTransformOrigin() {
+        const p = dom.panel, b = dom.gymTab; if (!p || !b) return;
+        const pr = p.getBoundingClientRect(), br = b.getBoundingClientRect();
+        if (pr.width === 0 || pr.height === 0) {
+            // Panel not yet measured, defer to next frame
+            window.requestAnimationFrame(updateTransformOrigin);
+            return;
+        }
+        const cx = br.left + (br.width / 2), cy = br.top + (br.height / 2);
+        p.style.transformOrigin = `${cx - pr.left}px ${cy - pr.top}px`;
+    }
+    function setupEventListeners(root) {
+        cacheDOM(root);
+        const get = (id) => root.querySelector('#' + id);
+        const hb = get('bbgl-header-bar'); if (hb) hb.onclick = (e) => { if (e.target.closest('.bbgl-custom-icon') || e.target.closest('#bbgl-pop-btn') || e.target.closest('#bbgl-demo-exit')) return; closePanel(); };
+        const atBtn = get('all-time-btn'); if (atBtn) atBtn.onclick = (e) => { e.stopPropagation(); calcAllTimeStats(); };
+        const cb = get('bbgl-close-btn'); if (cb) cb.onclick = () => closePanel();
+        const sb = get('bbgl-settings-btn'); if (sb) sb.onclick = toggleSettingsView;
+        const csb = root.querySelector('.close-settings-btn'); if (csb) csb.onclick = toggleSettingsView;
+        const debBtn = get('bbgl-demo-exit-btn');
+        const deb = get('bbgl-demo-exit'); if (deb) deb.onclick = (e) => {
+            e.stopPropagation();
+            const enteredFrom = runtime.demoEnteredFrom; runtime.demoEnteredFrom = null;
+            localStorage.removeItem(KEYS.DEMO);
+            runtime.demoMode = false;
+            runtime.demoHistory = null;
+            runtime.stickerData = [];
+            _historyCache = null;
+            DataController.invalidate();
+            calendarState.selectedData = null;
+            calendarState.selectedLabel = Formatter.dateLogical();
+            viewState.activeViewLabel = null;
+            deb.style.display = 'none';
+            if (debBtn) debBtn.style.display = 'none';
+            if (userConfig.apiKey) { checkStaleness(); startBackgroundSync(); }
+            if (window.TooltipController) window.TooltipController.hide();
+            refreshInitLock();
+            refreshDemoMasks();
+            switchView('welcome', true);
+            if (enteredFrom === 'privacy') openPrivacyModal();
+            else if (enteredFrom === 'settings') switchView('settings');
+        };
+        if (debBtn) debBtn.onclick = deb ? deb.onclick : null;
+        const pb = get('bbgl-pop-btn'); if (pb) pb.onclick = (e) => { e.stopPropagation(); viewState.expanded = !viewState.expanded; const p = dom.panel; if (viewState.expanded) { p.classList.add('bbgl-expanded'); pb.innerHTML = ICONS.MAXIMIZE; } else { p.classList.remove('bbgl-expanded'); pb.innerHTML = ICONS.POPOUT; } saveViewState(); handleLayout(); renderPanelContent(); if (dom.topPanel.classList.contains('viewing-graph')) { GraphController.draw(); setTimeout(GraphController.draw, 320); } };
+        const tt = get('bbgl-tall-toggle'); if (tt) tt.onclick = toggleTall;
+        const lt = get('bbgl-ledger-toggle'); if (lt) lt.onclick = toggleLedgerView;
+        const cpb = dom.copyBtn; if (cpb) cpb.onclick = (e) => {
+            e.stopPropagation();
+            const cs = runtime.currentStats; if (!cs) return;
+            const { sl, s } = cs;
+            let ds = '';
+            if (sl._dailyList && sl._dailyList.length > 1) {
+                ds = `${Formatter.dateFull(sl._dailyList[0].date)} - ${Formatter.dateFull(sl._dailyList[sl._dailyList.length - 1].date)}`;
+            } else {
+                ds = Formatter.dateFull(sl.date);
+            }
+            const fM = (v) => (Math.abs(v) >= 1e9) ? Formatter.abbr(v, 4) : Formatter.number(v);
+            let txt = `💪🏿 BBGymLog | ${ds} | ⚡ ${Formatter.number(s.total.cost)} E`;
+            ['str', 'def', 'spd', 'dex'].forEach(k => {
+                if (s[k].gain > 0 || s[k].cost > 0) {
+                    const kn = { 'str': 'Strength', 'def': 'Defense', 'spd': 'Speed', 'dex': 'Dexterity' }[k];
+                    txt += ` | ${kn}: +${fM(s[k].gain)} (${fM(s[k].start)} → ${fM(s[k].end)})`;
+                }
+            });
+            navigator.clipboard.writeText(txt).then(() => {
+                const originalHtml = cpb.innerHTML;
+                const originalColor = cpb.style.color;
+                cpb.innerHTML = ICONS.CHECK;
+                cpb.style.color = '#69f0ae';
+                cpb.style.opacity = '1';
+                setTimeout(() => {
+                    cpb.innerHTML = originalHtml;
+                    cpb.style.color = originalColor;
+                    cpb.style.opacity = '';
+                }, 1000);
+            });
+        };
+        const gt = get('bbgl-graph-toggle'); if (gt) gt.onclick = toggleGraphView;
+        const act = get('bbgl-achievements-toggle'); if (act) act.onclick = toggleAchievementsView;
+        const st = get('bbgl-sticker-toggle'); if (st) st.onclick = toggleStickerView;
+        const sp = get('sticker-prev-btn'), sn = get('sticker-next-btn'); if (sp) sp.onclick = (e) => { e.stopPropagation(); if (runtime.currentStickerPage > 0) changeStickerPage(-1); }; if (sn) sn.onclick = (e) => { e.stopPropagation(); if (runtime.currentStickerPage < Math.ceil((runtime.stickerData.length || 0) / 10) - 1) changeStickerPage(1); };
+        const pm = get('prev-month-btn'); if (pm) pm.onclick = () => changeMonth(-1);
+        const nm = get('next-month-btn'); if (nm) nm.onclick = () => changeMonth(1);
+        const mt = get('month-trigger'); if (mt) mt.onclick = (e) => { e.stopPropagation(); toggleMonthDropdown(); };
+        const yt = get('year-trigger'); if (yt) yt.onclick = (e) => { e.stopPropagation(); toggleYearDropdown(); };
+        const ms = get('month-stats-btn'); if (ms) ms.onclick = (e) => { e.stopPropagation(); calcPeriodStats('month'); };
+        const ys = get('year-stats-btn'); if (ys) ys.onclick = (e) => { e.stopPropagation(); calcPeriodStats('year'); };
+        const at = get('set-anim-toggle'); if (at) { at.checked = userConfig.animations; at.onchange = () => { userConfig.animations = at.checked; saveConfig(); if (dom.panel) dom.panel.classList.toggle('bbgl-no-animations', !userConfig.animations); renderPanelContent(); }; }
+        const rt = get('set-rate-toggle'); if (rt) { rt.checked = userConfig.ratesEnabled; rt.onchange = () => { userConfig.ratesEnabled = rt.checked; saveConfig(); if (dom.panel) dom.panel.classList.toggle('bbgl-no-rates', !userConfig.ratesEnabled); if (!userConfig.ratesEnabled && graphState.mode === 'rates') { graphState.mode = 'values'; viewState.graphMode = 'values'; saveViewState(); } const tp = dom.topPanel; if (tp && tp.classList.contains('viewing-graph')) { GraphController.restoreUi(); GraphController.draw(); } else { const sd = calendarState.selectedData; renderStats(sd || getActiveHistory().today, calendarState.selectedLabel || Formatter.dateLogical()); } }; }
+        const ls = get('set-loc-select'); if (ls) { ls.value = userConfig.buttonLocation; ls.onchange = () => onChangeLoc(ls.value); }
+        const ds = get('set-day-start'); if (ds) { ds.value = userConfig.dayStartMode; ds.onchange = () => onChangeDayStart(ds.value); }
+        const ws = get('set-week-start'); if (ws) { ws.value = userConfig.weekStartMode; ws.onchange = () => onChangeWeekStart(ws.value); }
+        const ai = get('set-api-key'), ap = get('set-api-paste');
+        if (ap && ai) ap.onclick = async () => { try { const t = await navigator.clipboard.readText(); if (t) ai.value = t.trim(); } catch (e) { alert("Clipboard access denied. Please paste manually."); } };
+        const ub = get('updt-settings-btn');
+        if (ub && ai) ub.onclick = async function () {
+            this.blur(); const v = ai.value.trim();
+            if (!/^[a-zA-Z0-9]{16}$/.test(v)) { alert("Invalid Format.\nA Torn API Key must be exactly 16 alphanumeric characters."); return; }
+            const ot = ub.innerText; ub.innerText = "VERIFYING...";
+            try {
+                const res = await fetch(`https://api.torn.com/user/?selections=battlestats,log&log=5300&key=${v}`);
+                const data = await res.json();
+                if (data.error) {
+                    alert(`Key Verification Failed: ${data.error.error}\n\nPlease generate a key properly configured with 'battlestats' and 'log' access.`);
+                    ub.innerText = ot;
+                    return;
+                }
+                userConfig.apiKey = v; saveConfig();
+                ub.style.transition = "all 0.2s"; ub.style.color = "#69f0ae"; ub.style.borderColor = "#69f0ae"; ub.innerText = "KEY SAVED";
+                if (ub.dataset.timer) clearTimeout(ub.dataset.timer);
+                ub.dataset.timer = setTimeout(() => { ub.style.color = ""; ub.style.borderColor = ""; ub.innerText = ot; }, 2000);
+            } catch (e) {
+                alert("Network error during verification.");
+                ub.innerText = ot;
+            }
+        };
+        const cab = get('clear-api-btn'); if (cab && ai) cab.onclick = function () { this.blur(); userConfig.apiKey = ''; saveConfig(); ai.value = ''; localStorage.removeItem(KEYS.LAST_SYNC); localStorage.removeItem(KEYS.BS_SYNC); sessionStorage.removeItem(KEYS.SESSION_CACHE); sessionStorage.removeItem(KEYS.SESSION); const ot = cab.innerText; cab.innerText = "WIPED"; setTimeout(() => { cab.innerText = ot; }, 2000); };
+        const crb = get('create-api-btn'); if (crb) crb.onclick = function () { this.blur(); window.open('https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=BBGymLog&user=battlestats,log', '_blank'); };
+        const rb = get('refresh-log-btn'); if (rb) rb.onclick = function () { this.blur(); if (checkRefreshCooldown(this)) return; syncWithFeedback('FULL_SYNC'); };
+        const eb = get('export-btn'); if (eb) eb.onclick = function () { this.blur(); exportData(); };
+        const ib = get('import-btn'); if (ib) ib.onclick = function () { this.blur(); get('import-file').click(); };
+        const iF = get('import-file'); if (iF) iF.onchange = (e) => importData(e.target.files[0]);
+        const clb = get('clear-btn'); if (clb) clb.onclick = function () { this.blur(); clearData(); };
+        const wb = get('show-welcome-btn'); if (wb) wb.onclick = function () { this.blur(); runtime.welcomeReturn = 'settings'; switchView('welcome'); };
+        const pl = get('settings-privacy-btn'); if (pl) pl.onclick = function () { this.blur(); openPrivacyModal(); };
+        const sdemo = get('settings-demo-btn'); if (sdemo) sdemo.onclick = function () { this.blur(); enterDemoFromSettings(); };
+        const drb = get('dev-reset-btn'); if (drb) drb.onclick = function () { this.blur(); devFactoryReset(); };
+        // Calendar swipe: left/right swipe changes the month
+        const sa = get('swipe-area');
+        if (sa) {
+            let _swipeStartX = 0, _swipeStartY = 0;
+            sa.addEventListener('touchstart', (e) => { _swipeStartX = e.touches[0].clientX; _swipeStartY = e.touches[0].clientY; }, { passive: true });
+            sa.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX - _swipeStartX, dy = e.changedTouches[0].clientY - _swipeStartY; if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) changeMonth(dx < 0 ? 1 : -1); }, { passive: true });
+        }
+        // Sticker swipe: left/right swipe changes sticker page
+        const sgSwipe = get('bbgl-sticker-grid');
+        if (sgSwipe) {
+            let _sgStartX = 0, _sgStartY = 0;
+            sgSwipe.addEventListener('touchstart', (e) => { _sgStartX = e.touches[0].clientX; _sgStartY = e.touches[0].clientY; }, { passive: true });
+            sgSwipe.addEventListener('touchend', (e) => {
+                const dx = e.changedTouches[0].clientX - _sgStartX, dy = e.changedTouches[0].clientY - _sgStartY;
+                if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                    const dir = dx < 0 ? 1 : -1; const maxP = Math.ceil((runtime.stickerData.length || 0) / 10) - 1;
+                    if ((dir < 0 && runtime.currentStickerPage > 0) || (dir > 0 && runtime.currentStickerPage < maxP)) changeStickerPage(dir);
+                }
+            }, { passive: true });
+        }
+        GraphController.setupControls(); setupStickerGrid();
+        refreshInitLock();
+    }
+    function handleStorageEvent(e) {
+        if (e.key === KEYS.STATE) {
+            try {
+                const ns = JSON.parse(e.newValue);
+                if (!ns) return;
+
+                // CRITICAL: Block any local state-saves while we are parsing an incoming state
+                runtime.isSyncing = true;
+
+                // Detect changes before updating global viewState
+                const openChanged = ns.isOpen !== viewState.isOpen;
+                const viewChanged = ns.subView !== viewState.subView;
+                const expandedChanged = ns.expanded !== viewState.expanded;
+                const tallChanged = ns.isTall !== viewState.isTall;
+                const stickerPageChanged = ns.currentStickerPage !== viewState.currentStickerPage;
+                const labelChanged = ns.activeViewLabel !== viewState.activeViewLabel;
+                const calendarChanged = (ns.calMonth !== viewState.calMonth || ns.calYear !== viewState.calYear);
+                const itemChanged = ns.activeItemId !== viewState.activeItemId;
+                const graphModeChanged = ns.graphMode !== viewState.graphMode;
+                const graphStatsChanged = JSON.stringify(ns.graphStats) !== JSON.stringify(viewState.graphStats);
+
+                // Sync the internal object BEFORE triggering any UI functions
+                viewState = ns;
+
+                const p = dom.panel;
+                if (!p) { runtime.isSyncing = false; return; }
+
+                if (!openChanged && !viewChanged && !expandedChanged && !tallChanged && !stickerPageChanged && !labelChanged && !calendarChanged && !itemChanged && !graphModeChanged && !graphStatsChanged) {
+                    runtime.isSyncing = false;
+                    return;
+                }
+
+                // 1. Handle Panel Open/Close state
+                if (!p.classList.contains('bbgl-mode-page') && openChanged) {
+                    if (ns.isOpen && p.style.display === 'none') {
+                        togglePanel(false);
+                    } else if (!ns.isOpen && p.style.display !== 'none') {
+                        closePanel(null);
+                    }
+                }
+
+                // 2. Handle View Switching
+                if (viewChanged) {
+                    switchView(ns.subView);
+                }
+
+                // 3. Handle Sticker Page sync
+                if (stickerPageChanged) {
+                    runtime.currentStickerPage = ns.currentStickerPage || 0;
+                    if (ns.subView === 'stickers') renderStickers();
+                }
+
+                // 6. Apply Graph Specific Changes
+                if (graphModeChanged || graphStatsChanged) {
+                    if (ns.graphMode) graphState.mode = (ns.graphMode === 'gains' ? 'values' : ns.graphMode) || 'values';
+                    if (ns.graphStats) graphState.activeStats = ns.graphStats;
+                    GraphController.restoreUi();
+                    if (ns.subView === 'graph') window.requestAnimationFrame(GraphController.draw);
+                }
+
+                // 7. Apply Calendar/Data Selection Changes
+                if (labelChanged) {
+                    if (ns.activeViewLabel) {
+                        const s = getActiveHistory();
+                        let td = null;
+                        if (/^\d{4}-\d{2}-\d{2}$/.test(ns.activeViewLabel)) {
+                            td = s.history.find(d => d.date === ns.activeViewLabel);
+                            if (!td && s.today.date === ns.activeViewLabel) td = s.today;
+                            if (td) {
+                                calendarState.selectedData = td;
+                                calendarState.selectedLabel = ns.activeViewLabel;
+                                if (ns.subView === 'graph') {
+                                    GraphController.draw();
+                                    const de = dom.dateLabel;
+                                    if (de) de.innerText = Formatter.datePretty(ns.activeViewLabel);
+                                } else {
+                                    renderStats(td, ns.activeViewLabel);
+                                }
+                            }
+                        } else {
+                            calendarState.selectedLabel = ns.activeViewLabel;
+                            const type = /^\d{4}$/.test(ns.activeViewLabel) ? 'YEAR' : 'MONTH';
+                            const sl = DataController.getSlice(type, ns.activeViewLabel, calendarState.year);
+                            calendarState.selectedData = sl;
+                            if (ns.subView === 'graph') GraphController.draw();
+                            else renderStats(sl, ns.activeViewLabel);
+                        }
+                    } else {
+                        calendarState.selectedData = null;
+                        calendarState.selectedLabel = null;
+                        const ts = Formatter.dateLogical();
+                        if (ns.subView === 'graph') {
+                            GraphController.draw();
+                            const de = dom.dateLabel;
+                            if (de) de.innerText = Formatter.datePretty(ts);
+                        } else {
+                            renderStats(getActiveHistory().today, ts);
+                        }
+                    }
+                    renderPanelContent();
+                } else if (calendarChanged) {
+                    if (ns.calYear) calendarState.year = ns.calYear;
+                    if (ns.calMonth !== undefined && ns.calMonth !== null) calendarState.month = ns.calMonth;
+                    renderPanelContent();
+                }
+
+                // 8. Handle UI Layout (Tall/Expanded)
+                if (!p.classList.contains('bbgl-mode-page')) {
+                    if (expandedChanged) {
+                        if (ns.expanded) p.classList.add('bbgl-expanded');
+                        else p.classList.remove('bbgl-expanded');
+                        const pb = dom.popBtn;
+                        if (pb) pb.innerHTML = ns.expanded ? ICONS.MAXIMIZE : ICONS.POPOUT;
+                    }
+                    if (tallChanged) {
+                        if (ns.isTall) p.classList.add('bbgl-tall');
+                        else p.classList.remove('bbgl-tall');
+                        const tb = dom.tallToggle;
+                        if (tb) tb.innerText = ns.isTall ? "–" : "+";
+                    }
+                    if (expandedChanged || tallChanged) handleLayout();
+                }
+
+                // 9. Handle Sticker/Viewer specific sync
+                if (ns.subView === 'stickers' || ns.subView === 'viewer') {
+                    const ti = ns.activeItemId ? Number(ns.activeItemId) : null;
+                    if (ti && ti !== runtime.currentOpenedItemId) {
+                        if (!runtime.stickerData.length) loadStickerData();
+                        const i = runtime.stickerData.find(x => x.id === ti);
+                        if (i) openItemViewer(i, false);
+                    } else if (!ti && runtime.currentOpenedItemId !== null) {
+                        closeItemViewer(false);
+                    }
+                }
+
+            } catch (err) {
+                console.warn("BBGL: Sync error", err);
+            } finally {
+                runtime.isSyncing = false;
+            }
+        }
+    }
+    async function init() {
+        injectStyles(); syncDevModeUI();
+
+        // Boot IndexedDB and pre-populate RAM cache before any rendering occurs
+        if (!runtime.demoMode) {
+            try {
+                await DBManager.initDB();
+                const stored = await DBManager.getStorage();
+                if (stored) {
+                    if (!stored.meta) stored.meta = {};
+                    const rebuilt = DataController._rebuildFromSeries(stored.series || [], stored.meta.baselineBreakdown || ZERO_BREAKDOWN);
+                    _historyCache = { meta: stored.meta, history: rebuilt.history, today: rebuilt.today };
+                    sessionStorage.setItem(KEYS.SESSION_CACHE, JSON.stringify(_historyCache));
+                    if (!localStorage.getItem('bbgl_initialized')) localStorage.setItem('bbgl_initialized', '1');
+                }
+            } catch (e) { console.warn('BBGL: IndexedDB boot failed, continuing with empty state', e); }
+        }
+
+        window.addEventListener('storage', handleStorageEvent); window.addEventListener('hashchange', checkViewRouting); window.addEventListener('popstate', checkViewRouting);
+        window.addEventListener('bbgl:dataUpdated', () => renderPanelContent());
+        const domObs = new MutationObserver(() => { handleDomMutation(); });
+        domObs.observe(document.body, { childList: true, subtree: true });
+        const layoutObs = new MutationObserver(() => { if (!runtime.layoutRafId) { runtime.layoutRafId = requestAnimationFrame(() => { runtime.layoutRafId = null; handleLayout(); }); } });
+        layoutObs.observe(document.body, { attributes: true, attributeFilter: ['class'], subtree: true });
+        calendarState.selectedLabel = Formatter.dateLogical();
+
+        window.devmode = (val) => {
+            const mode = (val === 'on' || val === true);
+            runtime.devMode = mode;
+            sessionStorage.setItem(KEYS.DEV_MODE, mode);
+            syncDevModeUI();
+            console.log(`BBGL: Developer mode ${mode ? 'ENABLED' : 'DISABLED'}`);
+        };
+
+        // Triggers updated here
+        if (!runtime.demoMode) { checkStaleness(); startBackgroundSync(); checkExitSync(); }
+
+        document.addEventListener('click', handleGymClick); TooltipController.init(); let tooltipRafId = null, tooltipSuppressUntil = 0; document.addEventListener('mousemove', (e) => { if (tooltipRafId || Date.now() < tooltipSuppressUntil) return; tooltipRafId = requestAnimationFrame(() => { TooltipController.handleHover(e); tooltipRafId = null; }); });
+        // Tap-toggle: track touchstart so swipes don't trigger tooltips
+        let _touchStartX = 0, _touchStartY = 0;
+        document.addEventListener('touchstart', (e) => { _touchStartX = e.touches[0].clientX; _touchStartY = e.touches[0].clientY; }, { passive: true });
+        document.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX - _touchStartX, dy = e.changedTouches[0].clientY - _touchStartY; if (Math.sqrt(dx * dx + dy * dy) > 10) { if (TooltipController.currentTarget) TooltipController.hide(); tooltipSuppressUntil = Date.now() + 500; return; } const t = TooltipController.resolve(e.target); if (t) { if (TooltipController.currentTarget === t) { TooltipController.hide(); } else { TooltipController.currentTarget = t; const h = t.getAttribute('data-tooltip-html'), txt = t.getAttribute('data-tooltip'); if (h) TooltipController.show(h, t.getBoundingClientRect()); else if (txt) TooltipController.show('<div style="text-align:center; color:#ddd;">' + txt + '</div>', t.getBoundingClientRect()); } } else if (TooltipController.currentTarget) { TooltipController.hide(); } tooltipSuppressUntil = Date.now() + 500; }, { passive: true });
+        document.addEventListener('click', function (e) { const t = e.target.closest('#bbgl-gym-tab'); if (t) { e.preventDefault(); e.stopPropagation(); togglePanel(true); } }, true);
+        handleDomMutation(); checkViewRouting(); if (!window.location.hash.includes('gymlog')) handleLayout();
+    }
+    init();
+})();
