@@ -6,8 +6,8 @@
 // @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
 // @grant        none
-// @updateURL    https://unguentary-gregorio-superabstractly.ngrok-free.dev/Big-Black-Gym-Log-Maxified.js
-// @downloadURL  https://unguentary-gregorio-superabstractly.ngrok-free.dev/Big-Black-Gym-Log-Maxified.js
+// @updateURL    https://raw.githubusercontent.com/BigBlackHawk42069/Big-Black-Gym-Log/refs/heads/main/BBGL%20Test%20Branch/Big-Black-Gym-Log-Test.js
+// @downloadURL  https://raw.githubusercontent.com/BigBlackHawk42069/Big-Black-Gym-Log/refs/heads/main/BBGL%20Test%20Branch/Big-Black-Gym-Log-Test.js
 // ==/UserScript==
 
 (function () {
