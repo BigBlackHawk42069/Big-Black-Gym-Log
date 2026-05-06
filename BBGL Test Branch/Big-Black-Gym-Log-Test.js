@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Big Black Gym Log
+// @name         Big Black Gym Log Teste
 // @namespace    http://tampermonkey.net/
 // @version      0.9.21
 // @description  A high-fidelity, gamified stat tracker built to integrate seamlessly with Torn's native UI.
