@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Big Black Gym Log Teste
 // @namespace    http://tampermonkey.net/
-// @version      0.9.27
+// @version      0.9.28
 // @description  A high-fidelity, gamified stat tracker built to integrate seamlessly with Torn's native UI.
 // @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
@@ -194,6 +194,9 @@
                         .bbgl-sb-notif .mobileLink___xTgRa > span:not([class]) { color:#ce93d8 !important; } /*-----------*/
                         .swiper-wrapper:has(.area-mobile___BH0Ku[id="nav-gym"]) { overflow:visible !important; }
                         .swiper-slide:has(> .area-mobile___BH0Ku[id="nav-gym"]) { overflow:visible !important; position:relative; }
+                        .swiper-wrapper:has(.area-mobile___BH0Ku[id="nav-gym"]):not(:has(#nav-gym-log-mobile)) > .swiper-slide:has(> .area-mobile___BH0Ku[id="nav-gym"]) {
+                          margin-right:43.375px !important;
+                        }
                         .swiper-wrapper:has(.area-mobile___BH0Ku[id="nav-gym"]):not(:has(#nav-gym-log-mobile)) > .swiper-slide:has(> .area-mobile___BH0Ku[id="nav-gym"])::after {
                           content:''; position:absolute; left:100%; top:0; width:43.375px; height:100%;
                           background:#555; border-radius:4px; pointer-events:none; z-index:1;
