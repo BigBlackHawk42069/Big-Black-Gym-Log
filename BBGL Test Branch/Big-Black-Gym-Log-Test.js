@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Big Black Gym Log Teste
 // @namespace    http://tampermonkey.net/
-// @version      0.9.33
+// @version      0.9.34
 // @description  A high-fidelity, gamified stat tracker built to integrate seamlessly with Torn's native UI.
 // @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
@@ -228,9 +228,9 @@
                         max-height:calc(100vh - 50px)!important; overflow-y:auto; overflow-x:hidden; } /*------------------*/
                         #bbgl-panel.bbgl-tall { --bbgl-f-label:12px; /*-----------------------------------------------------*/
                         --bbgl-f-top:12px; --bbgl-f-bot:11px; --bbgl-col-gap:13px; } /*-----------------------------------*/
-                        #bbgl-panel.bbgl-tall.bbgl-expanded { --bbgl-f-label:clamp(14px,2.69cqi,15.5px); /*----------------*/
-                        --bbgl-f-top:clamp(14px,2.69cqi,15.5px); --bbgl-f-bot:clamp(12px,2.26cqi,13px); /*-----------------*/
-                        --bbgl-col-gap:clamp(11px,3.82cqi,22px); } #bbgl-panel.bbgl-mode-page { position:relative!important; 
+                        #bbgl-panel.bbgl-tall.bbgl-expanded { --bbgl-f-label:clamp(14.5px,calc(13.6px + 0.33cqi),15.5px); /*---*/
+                        --bbgl-f-top:clamp(14.5px,calc(13.6px + 0.33cqi),15.5px); --bbgl-f-bot:clamp(12.3px,calc(11.4px + 0.28cqi),13px);
+                        --bbgl-col-gap:clamp(22px,calc(26px - 0.7cqi),24px); } #bbgl-panel.bbgl-mode-page { position:relative!important; 
                         top:0!important; left:0!important; right:auto!important; bottom:auto!important; /*----------------*/
                         width:100%!important; flex:1; max-width:none!important; height:auto!important; /*-----------------*/
                         max-height:none!important; border:1px solid #444!important; border-radius:5px!important; /*-------*/
@@ -469,9 +469,9 @@
                         .bbgl-tall #bbgl-copy-btn { right:8px; opacity:1; pointer-events:auto; } /*-----------------------*/
                         .bbgl-expanded #bbgl-tall-toggle { top:3px; left:3px; font-size:15px; width:19px; height:19px; }    
                         .bbgl-expanded.bbgl-tall #bbgl-ledger-toggle { width:15.5px; height:15.5px; left:32px; } /*-------*/
-                        .bbgl-expanded.bbgl-tall #bbgl-graph-toggle { width:16px; height:16px; left:57px; } /*------------*/
-                        .bbgl-expanded.bbgl-tall #bbgl-achievements-toggle { width:15.5px; height:15.5px; left:82px; } /*-*/
-                        .bbgl-expanded.bbgl-tall #bbgl-sticker-toggle { width:16px; height:16px; left:107px; } /*---------*/
+                        .bbgl-expanded.bbgl-tall #bbgl-graph-toggle { width:16px; height:16px; left:60px; } /*------------*/
+                        .bbgl-expanded.bbgl-tall #bbgl-achievements-toggle { width:15.5px; height:15.5px; left:88px; } /*-*/
+                        .bbgl-expanded.bbgl-tall #bbgl-sticker-toggle { width:16px; height:16px; left:116px; } /*---------*/
                         .bbgl-expanded.bbgl-tall #bbgl-copy-btn { width:16px; height:16px; right:10px; } /*---------------*/
                         #bbgl-panel.bbgl-mode-page #bbgl-ledger-toggle, #bbgl-panel.bbgl-mode-page #bbgl-graph-toggle, /*-*/
                         #bbgl-panel.bbgl-mode-page #bbgl-achievements-toggle, /*------------------------------------------*/
@@ -522,6 +522,7 @@
                         transition:opacity .3s; transform-origin:center; scrollbar-width:none; } /*-----------------------*/
                         .viewing-graph #bbgl-ledger-view, .viewing-stickers #bbgl-ledger-view, .viewing-achievements #bbgl-ledger-view { display:none!important;
                         } .bbgl-expanded .ledger-content { grid-template-columns:repeat(4,1fr); grid-template-rows:minmax(0,1fr); padding-top:6px; padding-bottom:14px; } /*-----*/
+                        #bbgl-panel.bbgl-tall.bbgl-expanded .ledger-content { padding-top:12px; } /*----------------------*/
                         .stat-column { display:flex; flex-direction:column; align-items:center; justify-content:flex-start; height:100%; /*-*/
                         border-right:1px solid rgba(255,255,255,0.05); padding:0 2px; min-height:0; } /*--------------------------------*/
                         .stat-column:last-child { border-right:none; } /*-------------------------------------------------*/
@@ -1015,11 +1016,11 @@
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle { /*---------------------------*/
                         left:32px!important; } /*-----------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-toggle { /*----------------------------*/
-                        left:57px!important; } /*----------------------------------------------------*/
+                        left:60px!important; } /*----------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle { /*---------------------*/
-                        left:82px!important; } /*----------------------------------------------------*/
+                        left:88px!important; } /*----------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle { /*--------------------------*/
-                        left:107px!important; } /*---------------------------------------------------*/
+                        left:116px!important; } /*---------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .arrow-btn { /*------------------------------------*/
                         font-size:clamp(18px,3.65cqi,21px)!important; } /*------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .all-time-btn { /*---------------------------------*/
@@ -1048,14 +1049,16 @@
                         /* Switch to size containment on expanded panel only so cqi/cqb can read both axes. -------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) { container-type:size; } /*------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-slot { /*---------------------------------*/
-                        height:min(clamp(50px,16.49cqi,95px), clamp(50px,15cqb,95px))!important; } /*--------------------*/
+                        height:min(clamp(75px,calc(63px + 5.5cqi),95px), clamp(75px,calc(63px + 5cqb),95px))!important; } /*--------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-slot-sponsor { /*-------------------------*/
-                        height:min(clamp(72px,23.78cqi,137px), clamp(72px,21.64cqb,137px))!important; /*-----------------*/
-                        max-width:clamp(80px,26.39cqi,152px)!important; } /*---------------------------------------------*/
+                        height:min(clamp(110px,calc(90px + 8.1cqi),137px), clamp(110px,calc(90px + 7.4cqb),137px))!important; /*-----------------*/
+                        max-width:clamp(120px,calc(100px + 9cqi),152px)!important; } /*---------------------------------------------*/
                         /* Inverse-scaling gaps: column-gap responds to width (cqi), row-gap to height (cqb) ------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-grid { /*-----------------------------*/
-                        column-gap:clamp(0px, calc(20px - 3cqi), 14px)!important; /*-------------------------------------*/
-                        row-gap:clamp(0px, calc(20px - 3cqb), 14px)!important; } /*--------------------------------------*/
+                        column-gap:clamp(4px,calc(35px - 5.3cqi),22px)!important; /*-------------------------------------*/
+                        row-gap:clamp(1px,calc(46px - 7.8cqi),35px)!important; } /*--------------------------------------*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-nav-btn { /*------------------------------*/
+                        font-size:clamp(20px,calc(14px + 3.1cqi),32px)!important; width:clamp(24px,calc(17px + 4cqi),40px)!important; }
                         .bbgl-coming-soon { position:absolute; top:50%; /*------------------------------------------------*/
                         left:50%; transform:translate(-50%, -50%); color:rgba(255,255,255,0.7); font-size:24px; /*------*/
                         font-weight:bold; letter-spacing:2px; /*----------------------------------------------------------*/
