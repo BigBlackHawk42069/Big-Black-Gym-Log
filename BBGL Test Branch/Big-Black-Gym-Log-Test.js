@@ -641,7 +641,7 @@
                         #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-achievements-toggle, /*------------------------*/
                         #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-sticker-toggle { width:18px!important; /*------*/
                         height:18px!important; top:10px!important; } /*---------------------------------------------------*/
-                        #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-graph-container .g-hud { margin-top: 12px!important;
+                        #bbgl-panel.bbgl-mode-page:not(.mobile-mode) #bbgl-graph-container .g-hud { margin-top: 8px!important;
                         margin-bottom: 6px!important; } #bbgl-item-viewer { display:none; flex:1; width:100%; /*----------*/
                         height:100%; background:radial-gradient(circle at center,#2e2e2e 0%,#1a1a1a 100%); /*-------------*/
                         flex-direction:column; align-items:center; justify-content:center; position:relative; /*----------*/
