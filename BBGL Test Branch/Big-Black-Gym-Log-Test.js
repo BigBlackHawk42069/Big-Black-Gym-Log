@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Big Black Gym Log Teste
 // @namespace    http://tampermonkey.net/
-// @version      0.9.40
+// @version      0.9.41
 // @description  A high-fidelity, gamified stat tracker built to integrate seamlessly with Torn's native UI.
 // @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
@@ -237,14 +237,14 @@
                         --bbgl-f-top:clamp(13px,calc(2px + 2.34cqi),15.5px); --bbgl-f-bot:clamp(11px,calc(1.5px + 1.997cqi),13px);
                         --bbgl-col-gap:clamp(22px,calc(35.5px - 2.34cqi),24.5px); } #bbgl-panel.bbgl-mode-page { position:relative!important; 
                         top:0!important; left:0!important; right:auto!important; bottom:auto!important; /*----------------*/
-                        width:100%!important; flex:1; max-width:none!important; height:auto!important; /*-----------------*/
+                        width:100%!important; flex:none!important; max-width:none!important; height:auto!important; /*-----------------*/
                         max-height:none!important; border:1px solid #444!important; border-radius:5px!important; /*-------*/
                         box-shadow:0 10px 30px rgba(0,0,0,0.5)!important; box-sizing:border-box!important; /*-------------*/
                         background:#2a2a2a!important; display:flex!important; flex-direction:column!important; /*---------*/
                         gap:0!important; z-index:1!important; overflow-x:hidden!important; overflow-y:visible!important; } /*-*/
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page { --bbgl-page-t:clamp(0,calc((100cqi - 350px) / 370px),1); /* t=0 narrow .. t=1 wide */
-                        --bbgl-f-label:clamp(12.5px,calc(12.5px + 4.5px * var(--bbgl-page-t)),17px); --bbgl-f-top:clamp(12.5px,calc(12.5px + 5.5px * var(--bbgl-page-t)),18px);
-                        --bbgl-f-bot:clamp(10.5px,calc(10.5px + 4.5px * var(--bbgl-page-t)),15px); --bbgl-f-top-mb:clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px);
+                        --bbgl-f-label:clamp(11.75px,calc(11.75px + 5.25px * var(--bbgl-page-t)),17px); --bbgl-f-top:clamp(11.75px,calc(11.75px + 6.25px * var(--bbgl-page-t)),18px);
+                        --bbgl-f-bot:clamp(10px,calc(10px + 5px * var(--bbgl-page-t)),15px); --bbgl-f-top-mb:clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px);
                         --bbgl-bot-minh:clamp(12px,calc(12px + 4px * var(--bbgl-page-t)),16px); --bbgl-col-gap:clamp(6px,calc(6px + 20px * var(--bbgl-page-t)),26px); } /*--*/
                         #bbgl-panel.bbgl-expanded.bbgl-tall.bbgl-mode-page { --bbgl-col-gap:clamp(6px,calc(6px + 14px * var(--bbgl-page-t)),20px); } /*--*/
                         .bbgl-mode-page .bbgl-header { display:none!important; } /*---------------------------------------*/
@@ -252,14 +252,15 @@
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-top-panel { flex:0 0 clamp(180px,calc(180px + 90px * var(--bbgl-page-t)),270px)!important;
                         height:clamp(180px,calc(180px + 90px * var(--bbgl-page-t)),270px)!important; width:100%; margin-bottom:0!important; border:none!important;
                         border-bottom:1px solid #444!important; border-radius:0!important; display:flex; flex-direction:column;
+                        padding-top:clamp(2px,calc(2px + 18px * var(--bbgl-page-t)),20px)!important;
                         overflow:hidden!important; box-shadow:inset 0 0 40px rgba(0,0,0,0.95)!important; } /*---------------*/
-                        #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-header-wrapper { flex:0 0 clamp(135px,calc(135px + 111px * var(--bbgl-page-t)),246px)!important; }
+                        #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-header-wrapper { flex:0 0 clamp(108px,calc(108px + 89px * var(--bbgl-page-t)),197px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-header-wrapper::before { left:4px!important; /*----*/
                         right:4px!important; } /*-------------------------------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-month-header { padding-left:clamp(4px,calc(4px + 3px * var(--bbgl-page-t)),7px)!important;
                         padding-right:clamp(16px,calc(16px + 16px * var(--bbgl-page-t)),32px)!important; gap:clamp(8px,calc(8px + 8px * var(--bbgl-page-t)),16px)!important; }
                         @container bbgl-panel (max-width:499px) { #bbgl-panel.bbgl-expanded.bbgl-mode-page { --bbgl-label-case:uppercase!important; } }
-                        .bbgl-mode-page #bbgl-bottom-panel { flex:1!important; width:100%; border:none!important; /*------*/
+                        .bbgl-mode-page #bbgl-bottom-panel { flex:none!important; width:100%; border:none!important; /*------*/
                         border-radius:0!important; background:0 0!important; min-height:0; display:flex; /*---------------*/
                         flex-direction:column; height:auto!important; overflow:visible!important; } /*--------------------*/
                         .bbgl-mode-page #bbgl-settings-view { flex:none; height:auto!important; } /*----------------------*/
@@ -268,28 +269,30 @@
                         .bbgl-mode-page:has(#bbgl-settings-view.active-view) { flex:none!important; } /*------------------*/
                         .bbgl-mode-page:has(#bbgl-settings-view.active-view) #bbgl-bottom-panel { flex:none!important; }    
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-grid-container { height:auto!important; /*---------*/
-                        flex:1; padding:0 clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px) 10px clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px)!important; overflow:visible!important; } /*--*/
-                        .bbgl-mode-page .calendar-wrapper { height:auto!important; overflow:hidden!important; } /*--------*/
+                        flex:none!important; padding:0 clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px) clamp(1px,calc(1px + 3px * var(--bbgl-page-t)),4px) clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px)!important; overflow:visible!important; } /*--*/
+                        .bbgl-mode-page .calendar-wrapper { height:auto!important; flex:none!important; overflow:hidden!important; } /*--------*/
                         .bbgl-mode-page .bbgl-cal-container { height:auto!important; display:flex; flex-direction:column; } 
                         .bbgl-mode-page .bbgl-row-slice { flex:none!important; width:100%; } /*---------------------------*/
                         .bbgl-mode-page .bbgl-day-cell { aspect-ratio:1/1!important; height:auto!important; /*------------*/
                         width:100%!important; } /*------------------------------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .ledger-content { height:auto!important; /*--------------*/
                         overflow:visible!important; align-content:flex-start!important; grid-template-rows:1fr!important;
-                        padding-top:clamp(26px,calc(26px + 4px * (1 - var(--bbgl-page-t))),30px)!important;
+                        padding-top:clamp(25px,calc(25px + 1px * var(--bbgl-page-t)),26px)!important;
                         padding-bottom:clamp(8px,calc(8px + 7px * var(--bbgl-page-t)),15px)!important;
                         padding-left:4px!important; padding-right:4px!important; } /*----------------------------------*/
+                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-achievements-container { padding-top:clamp(10px,calc(21px - 10.5px * var(--bbgl-page-t)),21px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .col-header, #bbgl-panel.bbgl-expanded.bbgl-mode-page .col-data-block { margin-bottom:calc(8px * (1 - var(--bbgl-page-t)))!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .day-num { top:clamp(2px,calc(2px + 4px * var(--bbgl-page-t)),6px)!important;
                         left:clamp(2px,calc(2px + 4px * var(--bbgl-page-t)),6px)!important;
                         font-size:clamp(10px,calc(10px + 8px * var(--bbgl-page-t)),18px)!important;
-                        width:clamp(22px,calc(22px + 18px * var(--bbgl-page-t)),40px)!important; height:clamp(22px,calc(22px + 18px * var(--bbgl-page-t)),40px)!important; }
+                        width:clamp(22px,calc(22px + 14px * var(--bbgl-page-t)),36px)!important; height:clamp(22px,calc(22px + 14px * var(--bbgl-page-t)),36px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-day-cell.is-viewing .day-num { font-size:clamp(14px,calc(14px + 10px * var(--bbgl-page-t)),24px)!important;
-                        width:clamp(26px,calc(26px + 10px * var(--bbgl-page-t)),36px)!important; height:clamp(26px,calc(26px + 10px * var(--bbgl-page-t)),36px)!important; }
+                        width:clamp(26px,calc(26px + 14px * var(--bbgl-page-t)),40px)!important; height:clamp(26px,calc(26px + 14px * var(--bbgl-page-t)),40px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .ui-floating-label, #bbgl-panel.bbgl-expanded.bbgl-mode-page .ui-floating-summary {
                         font-size:clamp(11px,calc(11px + 4px * var(--bbgl-page-t)),15px)!important;
                         bottom:clamp(4px,calc(4px + 2px * var(--bbgl-page-t)),6px)!important; }
-                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container { padding-top:clamp(28px,calc(28px + 4px * var(--bbgl-page-t)),32px)!important; }
+                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container { padding-top:clamp(10px,calc(18px - 7.5px * var(--bbgl-page-t)),18px)!important;
+                        padding-left:clamp(5px,calc(5px + 6px * var(--bbgl-page-t)),11px)!important; padding-right:clamp(5px,calc(5px + 6px * var(--bbgl-page-t)),11px)!important; }
                         @container bbgl-panel (max-width:499px) { #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-header-wrapper,
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container, #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-cal-container { will-change:transform; } }
                         .bbgl-mode-page #bbgl-close-btn, .bbgl-mode-page #bbgl-pop-btn, .bbgl-mode-page #bbgl-tall-toggle { display:none!important;
@@ -409,7 +412,8 @@
                         } /*----------------------------------------------------------------------------------------------*/
                         #bbgl-ledger-toggle svg, #bbgl-graph-toggle svg, #bbgl-achievements-toggle svg, #bbgl-sticker-toggle svg, #bbgl-copy-btn svg { width:14px;
                         height:14px; fill:currentColor; } /*--------------------------------------------------------------*/
-                        #bbgl-ledger-toggle, #bbgl-ledger-toggle svg, #bbgl-achievements-toggle, #bbgl-achievements-toggle svg { width:13.5px;
+                        #bbgl-ledger-toggle, #bbgl-ledger-toggle svg, #bbgl-achievements-toggle, #bbgl-achievements-toggle svg,
+                        #bbgl-copy-btn, #bbgl-copy-btn svg { width:13.5px;
                         height:13.5px; } /*-------------------------------------------------------------------------------*/
                         .viewing-graph #bbgl-graph-toggle, .viewing-achievements #bbgl-achievements-toggle, .viewing-stickers #bbgl-sticker-toggle { color:#fff!important;
                         filter:drop-shadow(0 0 5px rgba(255,255,255,0.7)); transform:scale(1.15); } /*--------------------*/
@@ -425,17 +429,16 @@
                         .bbgl-expanded.bbgl-tall #bbgl-graph-toggle { width:16px; height:16px; left:60px; } /*------------*/
                         .bbgl-expanded.bbgl-tall #bbgl-achievements-toggle { width:15.5px; height:15.5px; left:88px; } /*-*/
                         .bbgl-expanded.bbgl-tall #bbgl-sticker-toggle { width:16px; height:16px; left:116px; } /*---------*/
-                        .bbgl-expanded.bbgl-tall #bbgl-copy-btn { width:16px; height:16px; right:10px; } /*---------------*/
+                        .bbgl-expanded.bbgl-tall #bbgl-copy-btn { width:15.5px; height:15.5px; right:10px; } /*-----------*/
                         #bbgl-panel.bbgl-mode-page #bbgl-ledger-toggle, #bbgl-panel.bbgl-mode-page #bbgl-graph-toggle, /*-*/
                         #bbgl-panel.bbgl-mode-page #bbgl-achievements-toggle, /*------------------------------------------*/
                         #bbgl-panel.bbgl-mode-page #bbgl-sticker-toggle, /*-----------------------------------------------*/
                         #bbgl-panel.bbgl-mode-page #bbgl-copy-btn { width:16px; height:16px; top:6px; } /*----------------*/
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-ledger-toggle, #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-toggle,
-                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-achievements-toggle, #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-sticker-toggle {
+                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-achievements-toggle, #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-sticker-toggle,
+                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-copy-btn {
                         width:clamp(16px,calc(16px + 2px * var(--bbgl-page-t)),18px)!important; height:clamp(16px,calc(16px + 2px * var(--bbgl-page-t)),18px)!important;
                         top:clamp(6px,calc(6px + 4px * var(--bbgl-page-t)),10px)!important; }
-                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-copy-btn { width:clamp(16px,calc(16px + 0.5px * var(--bbgl-page-t)),16.5px)!important;
-                        height:clamp(16px,calc(16px + 0.5px * var(--bbgl-page-t)),16.5px)!important; top:clamp(6px,calc(6px + 4px * var(--bbgl-page-t)),10px)!important; }
                         #bbgl-panel.bbgl-mode-page #bbgl-ledger-toggle { left:32px; } /*----------------------------------*/
                         #bbgl-panel.bbgl-mode-page #bbgl-graph-toggle { left:62px; } /*-----------------------------------*/
                         #bbgl-panel.bbgl-mode-page #bbgl-achievements-toggle { left:92px; } /*----------------------------*/
@@ -463,7 +466,9 @@
                         #bbgl-top-panel.viewing-stickers { box-shadow:none!important; border-bottom:none!important; /*----*/
                         background-color:transparent!important; padding-bottom:2px!important; } /*------------------------*/
                         #bbgl-top-panel.viewing-stickers::after, #bbgl-top-panel.viewing-stickers .glass-overlay { display:none!important;
-                        } .ledger-content { position:relative; flex:1; overflow-y:auto; overflow-x:hidden; /*-------------*/
+                        } #bbgl-panel:not(.bbgl-mode-page) #bbgl-top-panel.viewing-achievements { /*------------------------*/
+                        padding-top:max(0px,calc(clamp(2px,calc(2px + 18px * var(--bbgl-dock-t,0)),20px) - calc(2px * var(--bbgl-dock-t,0))))!important; } /*-*/
+                        .ledger-content { position:relative; flex:1; overflow-y:auto; overflow-x:hidden; /*-------------*/
                         padding:4px 2px; display:grid; grid-template-columns:repeat(4,1fr); gap:0; /*---------------------*/
                         transition:opacity .3s; transform-origin:center; scrollbar-width:none; } /*-----------------------*/
                         .viewing-graph #bbgl-ledger-view, .viewing-stickers #bbgl-ledger-view, .viewing-achievements #bbgl-ledger-view { display:none!important;
@@ -496,15 +501,16 @@
                         #bbgl-graph-container, #bbgl-achievements-container { display:none; flex:1; /*--------------------*/
                         flex-direction:column; position:relative; z-index:20; } /*----------------------------------------*/
                         .viewing-graph #bbgl-graph-container, .viewing-achievements #bbgl-achievements-container { display:flex;
-                        } #bbgl-graph-container { padding:4px 10px 2px 10px; z-index:40; transform-origin:center; /*------*/
+                        } #bbgl-graph-container { --bbgl-gx:clamp(5px, calc(5px + (100cqi - 300px) * 6 / 276), 11px);
+                        padding:4px var(--bbgl-gx) 2px var(--bbgl-gx); z-index:40; transform-origin:center; /*------------*/
                         touch-action:none; cursor:crosshair; min-height:0; overflow:visible; } /*-------------------------*/
                         .g-hud { display:flex; justify-content:space-between; align-items:center; /*----------------------*/
-                        margin-bottom:4px; z-index:60; position:relative; } .g-toggles { display:flex; gap:2px; } /*------*/
+                        margin-bottom:2px; z-index:60; position:relative; } .g-toggles { display:flex; gap:2px; align-items:center; } /*------*/
                         .g-pill { display:inline-flex; align-items:center; justify-content:center; /*----------------------*/
-                        font-size:8.5px; padding:1px 5px; border:1px solid #444; border-radius:3px; /*--------------------*/
+                        font-size:8.5px; padding:1px 5px; border:1px solid #444; border-radius:3px; /*-------------------*/
                         color:#666; cursor:pointer; text-transform:uppercase; font-weight:700; align-self:center; /*------*/
                         background:#1a1a1a; transition:color .2s, background .2s, border-color .2s; /*--------------------*/
-                        user-select:none; white-space:nowrap; line-height:1; } /*-----------------------------------------*/
+                        user-select:none; white-space:nowrap; line-height:1; vertical-align:middle; } /*-------------------------*/
                         .g-pill:hover { color:#ccc; border-color:#666; } .g-pill.active { color:var(--pill-c,#fff); /*----*/
                         background:var(--pill-bg,#333); border-color:var(--pill-c,#888); } /*-----------------------------*/
                         .g-pill.p-str { --pill-c:${CONSTANTS.COLORS.STR}; --pill-bg:rgba(229,115,115,0.1); } /*-----------*/
@@ -512,12 +518,12 @@
                         .g-pill.p-spd { --pill-c:${CONSTANTS.COLORS.SPD}; --pill-bg:rgba(186,104,200,0.1); } /*-----------*/
                         .g-pill.p-dex { --pill-c:${CONSTANTS.COLORS.DEX}; --pill-bg:rgba(255,183,77,0.1); } /*------------*/
                         .g-pill.p-tot { --pill-c:${CONSTANTS.COLORS.TOT}; --pill-bg:rgba(255,255,255,0.1); } /*-----------*/
-                        .bbgl-expanded .g-hud { margin-bottom:8px; } .bbgl-expanded .g-toggles { gap:6px; } /*------------*/
-                        .bbgl-expanded .g-pill { font-size:10px; padding:3px 8px; } /*------------------------------------*/
+                        .bbgl-expanded .g-hud { margin-bottom:4px; } .bbgl-expanded .g-toggles { gap:6px; align-items:center; } /*------------*/
+                        .bbgl-expanded .g-pill { font-size:10px; padding:2px 8px; line-height:1.18; } /*-----------------------------*/
                         #bbgl-panel:not(.bbgl-expanded):not(.bbgl-mode-page) .g-hud { margin-top:1px; } /*----------------*/
-                        #bbgl-panel:not(.bbgl-expanded):not(.bbgl-mode-page) .g-pill { padding:2px 5px; } /*--------------*/
-                        .bbgl-expanded .g-text { font-size:11px; } #bbgl-graph-svg { width:100%; flex:1; overflow:visible;  
-                        pointer-events:none; height:100%; display:block; } /*---------------------------------------------*/
+                        #bbgl-panel:not(.bbgl-expanded):not(.bbgl-mode-page) .g-pill { padding:1px 5px; } /*-------------*/
+                        .bbgl-expanded .g-text { font-size:11px; } #bbgl-graph-svg { width:100%; flex:1; min-height:0; overflow:visible;
+                        pointer-events:none; display:block; } /*---------------------------------------------*/
                         .g-axis { stroke:rgba(255,255,255,0.1); stroke-width:1; } /*--------------------------------------*/
                         .g-path { fill:none; stroke-width:2; vector-effect:non-scaling-stroke; /*-------------------------*/
                         stroke-linecap:round; transition:d .3s ease; } .g-text { fill:rgba(255,255,255,0.4); font-size:9px; 
@@ -556,7 +562,7 @@
                         .sticker-slot.active-slot { visibility:visible; } .bbgl-expanded .sticker-slot { height:95px; }     
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .sticker-slot { height:clamp(65px,calc(65px + 40px * var(--bbgl-page-t)),105px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-sticker-grid { row-gap:clamp(10px,calc(10px + 6px * var(--bbgl-page-t)),16px)!important;
-                        padding-top:clamp(5px,calc(20px - 15px * var(--bbgl-page-t)),20px)!important; column-gap:clamp(4px,calc(35px - 5.3cqi),22px)!important; }
+                        padding-top:clamp(5px,calc(5px + 9px * (1 - var(--bbgl-page-t))),14px)!important; column-gap:clamp(1px,calc(35px - 5.3cqi - 7px * (1 - var(--bbgl-page-t))),22px)!important; }
                         .sticker-slot.has-item:hover { cursor:pointer; z-index:45; } /*-----------------------------------*/
                         .sticker-img { height:80%; width:auto; max-width:140%; object-fit:contain; /*---------------------*/
                         transition:transform .2s,filter 0s; filter:drop-shadow(0 -0.5px 0 rgba(0,0,0,0.3)) drop-shadow(0 0.5px 0 rgba(255,255,255,0.4));
@@ -585,11 +591,13 @@
                         .viewing-stickers .copy-hist-btn { display:none!important; } /*-----------------------------------*/
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .copy-hist-btn { width:clamp(16px,calc(16px + 2px * var(--bbgl-page-t)),18px)!important;
                         height:clamp(16px,calc(16px + 2px * var(--bbgl-page-t)),18px)!important; top:clamp(6px,calc(6px + 4px * var(--bbgl-page-t)),10px)!important; }
-                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container .g-hud { margin-top:clamp(4px,calc(4px + 4px * var(--bbgl-page-t)),8px)!important;
-                        margin-bottom:clamp(4px,calc(4px + 2px * var(--bbgl-page-t)),6px)!important; }
+                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container .g-hud { margin-top:clamp(2px,calc(6px - 4px * var(--bbgl-page-t)),6px)!important;
+                        margin-bottom:clamp(2px,calc(2px + 1px * var(--bbgl-page-t)),3px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container .g-pill { font-size:clamp(9.8px,calc(9.8px + 0.2px * var(--bbgl-page-t)),10px)!important;
-                        padding:3px clamp(5px,calc(5px + 3px * var(--bbgl-page-t)),8px)!important; }
-                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container .g-toggles { gap:clamp(4px,calc(4px + 2px * var(--bbgl-page-t)),6px)!important; }
+                        padding:clamp(1px,calc(1px + 1px * var(--bbgl-page-t)),2px) clamp(5px,calc(5px + 3px * var(--bbgl-page-t)),8px)!important;
+                        line-height:calc(1.18 + 0.26 * (1 - var(--bbgl-page-t)))!important; }
+                        #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container .g-toggles { gap:clamp(4px,calc(4px + 2px * var(--bbgl-page-t)),6px)!important;
+                        align-items:center!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-graph-container .g-text { font-size:clamp(10px,calc(10px + 1px * var(--bbgl-page-t)),11px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-sticker-pagination { bottom:-2px!important; gap:clamp(4px,calc(4px + 2px * var(--bbgl-page-t)),6px)!important; }
                         #bbgl-panel.bbgl-expanded.bbgl-mode-page .pg-dot { width:clamp(5px,calc(5px + 1px * var(--bbgl-page-t)),6px)!important;
@@ -647,6 +655,7 @@
                         .bbgl-mode-page #bbgl-item-viewer.active { display:flex!important; width:100%!important; /*-------*/
                         height:calc(100vh - 420px + 60px * var(--bbgl-page-t))!important; min-height:clamp(300px,calc(300px + 200px * var(--bbgl-page-t)),500px)!important;
                         border:none!important; border-radius:0 0 5px 5px!important; box-sizing:border-box!important; flex:none!important; } /*---*/
+                        #bbgl-page-container .bbgl-mode-page:has(#bbgl-item-viewer.active) { flex:none!important; }
                         .bbgl-mode-page .viewer-info-overlay { top:clamp(10px,calc(10px + 6px * var(--bbgl-page-t)),16px)!important;
                         left:clamp(10px,calc(10px + 5px * var(--bbgl-page-t)),15px)!important; }
                         .bbgl-mode-page .vi-name { font-size:clamp(14px,calc(14px + 2px * var(--bbgl-page-t)),16px)!important; }
@@ -935,22 +944,22 @@
                         text-shadow:0 0 8px rgba(255,255,255,0.8)!important; } /*---------------------------------------*/
                         #bbgl-panel:not(.bbgl-expanded) { max-height:none!important; } /*---------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-pill { /*------------------*/
-                        font-size:9.5px!important; padding:1px 5px!important; } /*-------------------------------------*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-toggles { gap:4px!important; }
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-hud { margin-bottom:5px!important; }
+                        font-size:9.5px!important; padding:1px 5px!important; line-height:1.18!important; } /*------------*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-toggles { gap:4px!important; align-items:center!important; }
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-hud { margin-bottom:3px!important; }
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-text { font-size:9px!important; }
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-text.x-label { font-size:9px!important; }
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .stats-btn { width:28px!important; /*-------------*/
                         height:28px!important; } #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle, /*--*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle { width:15.5px!important; /*--*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle, #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn { width:15.5px!important; /*--*/
                         height:15.5px!important; } #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-toggle, /*---*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle, /*--------------------------*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn { width:16px!important; height:16px!important; } } /*---*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle { width:16px!important; height:16px!important; } } /*---*/
                         /* Expanded panel mode (non-page): fluid scaling via container queries on #bbgl-panel ----*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-header-wrapper { /*--------------------------*/
                         flex:0 0 145px!important; } /*------------------------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .bbgl-header-wrapper::before { left:0!important;
                         right:0!important; top:0!important; border-radius:5px 5px 0 0!important; } /*---------------------*/
+                        #bbgl-panel:not(.bbgl-mode-page) { --bbgl-dock-t:clamp(0,calc((100cqi - 350px) / 370px),1); } /*---*/
                         #bbgl-panel:not(.bbgl-mode-page) #bbgl-bottom-panel { overflow-y:auto!important; overflow-x:hidden!important; scrollbar-width:none; -ms-overflow-style:none; }
                         #bbgl-panel:not(.bbgl-mode-page) .bbgl-grid-container { padding:0!important; overflow:visible!important; height:auto!important; flex:none!important; } /*---*/
                         #bbgl-panel:not(.bbgl-mode-page) .calendar-wrapper { overflow:visible!important; height:auto!important; flex:none!important; }
@@ -964,15 +973,15 @@
                         width:clamp(24px,6.25cqi,36px)!important; height:clamp(24px,6.25cqi,36px)!important; } /*--------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle, /*----------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle, /*----------------------*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn, /*-------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle svg, /*------------------------*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle svg { /*-----------------*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-achievements-toggle svg, /*---------------*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn svg { /*----------------------------*/
                         width:15.5px!important; height:15.5px!important; } /*---------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-toggle, /*-----------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle, /*---------------------------*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn, /*---------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-toggle svg, /*-------------------------*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle svg, /*-----------------------*/
-                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-copy-btn svg { /*----------------------------*/
+                        #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-sticker-toggle svg { /*-----------------------*/
                         width:16px!important; height:16px!important; } /*-------------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-ledger-toggle { /*---------------------------*/
                         left:32px!important; } /*-----------------------------------------------------*/
@@ -999,9 +1008,10 @@
                         /* Expanded panel graph view: fluid scaling to replace hard 620px breakpoint -------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-pill { /*------------------*/
                         font-size:clamp(9.8px,1.736cqi,10px)!important; /*------------------------------------------------*/
-                        padding:3px clamp(5px,1.39cqi,8px)!important; } /*-------------------------------------------------*/
+                        padding:2px clamp(5px,1.39cqi,8px)!important;
+                        line-height:clamp(1.38,calc(1.18 + 0.26 * (1 - var(--bbgl-dock-t,0))),1.48)!important; } /*------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-toggles { /*--------------*/
-                        gap:clamp(4px,1.04cqi,6px)!important; } /*--------------------------------------------------------*/
+                        gap:clamp(4px,1.04cqi,6px)!important; align-items:center!important; } /*---------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-hud { /*------------------*/
                         margin-bottom:clamp(5px,1.39cqi,8px)!important; } /*----------------------------------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #bbgl-graph-container .g-text { /*-----------------*/
@@ -1009,6 +1019,11 @@
                         /* Expanded panel sticker grid: fluid sticker slot sizing to keep proportions ------------------*/
                         /* Switch to size containment on expanded panel only so cqi/cqb can read both axes. -------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) { container-type:size; } /*------------------------*/
+                        #bbgl-panel:not(.bbgl-mode-page) #bbgl-achievements-container { /*------------------------------*/
+                        padding-top:max(0px,calc(clamp(10px,calc(21px - 10.5px * var(--bbgl-dock-t,0)),21px) - calc(2px * var(--bbgl-dock-t,0))))!important;
+                        height:auto!important; overflow:visible!important; align-content:flex-start!important; } /*-*/
+                        #bbgl-panel:not(.bbgl-mode-page) #bbgl-achievements-container .bbgl-ach-scroll { /*--------------*/
+                        height:auto!important; flex:0 1 auto!important; overflow:visible!important; overflow-x:hidden!important; } /*-*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-slot { /*---------------------------------*/
                         height:min(clamp(75px,calc(63px + 5.5cqi),95px), clamp(75px,calc(63px + 5cqb),95px))!important; } /*--------------------*/
                         #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .sticker-slot-sponsor { /*-------------------------*/
@@ -1568,8 +1583,8 @@
             return "Tooltip";
         },
         draw() {
-            Perf.start('graphDraw'); if (document.hidden) { runtime.graphDirty = true; Perf.end('graphDraw'); return; } const svg = dom.graphSvg, cont = dom.graphContainer; if (!svg || !cont) { Perf.end('graphDraw'); return; } const dat = GraphController._transformData({ selectedData: calendarState.selectedData, selectedLabel: calendarState.selectedLabel, year: calendarState.year, graphMode: graphState.mode }), tr = dat.trends, lbls = dat.labels, vt = dat.viewType, xp = dat.xParams; svg.textContent = ''; svg.setAttribute('preserveAspectRatio', 'none'); const w = cont.clientWidth || 300, _rawH = svg.clientHeight || (cont.clientHeight - 26) || 0, h = _rawH > 0 ? _rawH : 0; if (h <= 0) return; const cmp = w < 300; const expandedPanel = !!cont.closest('#bbgl-panel.bbgl-expanded:not(.bbgl-mode-page)'); svg.setAttribute('viewBox', `0 0 ${w} ${h}`); let _yPeak = 0; graphState.activeStats.forEach(s => { if (tr[s]) tr[s].forEach(p => { if (isFinite(p.y) && p.y > _yPeak) _yPeak = p.y; }); }); const _yMT = document.createElementNS('http://www.w3.org/2000/svg', 'text'); _yMT.setAttribute('class', 'g-text y-label'); _yMT.style.cssText = 'visibility:hidden;pointer-events:none;'; svg.appendChild(_yMT); _yMT.textContent = Formatter.axis(_yPeak || 10); const _yLW = Math.ceil(_yMT.getBBox().width) || (cmp ? 14 : 22); svg.removeChild(_yMT); let mar = { top: 10, bottom: 15, left: _yLW + 5, right: 0 }; if (cmp) { mar.bottom = 5; } if (expandedPanel && !cmp) { mar.bottom = 11; }
-            const cw = w - mar.left - mar.right, ch = h - mar.top - mar.bottom; if (cw <= 0 || ch <= 0) return; const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); g.setAttribute("transform", `translate(${mar.left}, ${mar.top})`); let min = Infinity, max = -Infinity, hd = false; graphState.activeStats.forEach(s => { if (tr[s] && tr[s].length > 0) { hd = true; tr[s].forEach(p => { if (!isFinite(p.y)) return; if (p.y < min) min = p.y; if (p.y > max) max = p.y; }); } }); if (!hd || min === Infinity) { min = 0; STAT_KEYS.forEach(s => { if (tr[s] && tr[s].length > 0) tr[s].forEach(p => { if (isFinite(p.y) && p.y > max) max = p.y; }); }); } if (max === -Infinity) { min = 0; max = 10; } let sc = GraphController._calculateNiceScale(min, max), fMin = sc.min, fMax = sc.max, step = sc.step, steps = Math.round((fMax - fMin) / step), pL = [], rng = fMax - fMin; for (let i = 0; i <= steps; i++) pL.push(Formatter.axis(fMin + (i * step))); if (new Set(pL).size < (steps + 1)) { const div = ((n) => { const a = Math.abs(n); if (a >= 1e12) return 1e12; if (a >= 1e9) return 1e9; if (a >= 1e6) return 1e6; if (a >= 1e3) return 1e3; return 1; })(max); fMin = Math.floor(min / div) * div; fMax = Math.ceil(max / div) * div; if (fMax <= fMin) fMax = fMin + div; step = div; if ((fMax - fMin) / step < 2) fMax = fMin + (step * 2); steps = Math.round((fMax - fMin) / step); } let fr = fMax - fMin; if (fr <= 0) { fMax = fMin + 10; fr = 10; } for (let i = 0; i <= steps; i++) { const v = fMin + (i * step), y = ch - ((v - fMin) / fr) * ch; if (isNaN(y)) continue; const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); l.setAttribute("x1", 0); l.setAttribute("x2", cw); l.setAttribute("y1", y); l.setAttribute("y2", y); l.setAttribute("class", "g-axis"); g.appendChild(l); const t = document.createElementNS("http://www.w3.org/2000/svg", "text"); t.setAttribute("x", -6); t.setAttribute("y", expandedPanel ? y - 1 : y + 3); t.setAttribute("class", "g-text y-label"); t.textContent = Formatter.axis(v); g.appendChild(t); } const gx = (v) => { const r = xp.max - xp.min; return r === 0 ? 0 : ((v - xp.min) / r) * cw; }, gy = (v) => ch - ((v - fMin) / fr) * ch; (function _drawTicks() { const _addTick = (tx) => { const tk = document.createElementNS("http://www.w3.org/2000/svg", "line"); tk.setAttribute("x1", tx); tk.setAttribute("x2", tx); tk.setAttribute("y1", ch); tk.setAttribute("y2", ch - 5); tk.setAttribute("class", "g-axis"); g.appendChild(tk); }; if (vt === 'DAY') { for (let i = 0; i <= 12; i++) _addTick(gx(xp.min + (i * 7200000))); } else if (vt === 'ALL_TIME') { if (dat.tier && dat.tier.startsWith('Mo')) { const sw = 1; for (let n = Math.ceil(xp.min / sw); n * sw <= xp.max + 0.001; n++) _addTick(gx(n * sw)); } else if (dat.tier && dat.tier.startsWith('Yr')) { const oM = dat.anchorDate ? dat.anchorDate.getUTCMonth() : 0; for (let k = 1; (k * 12 - oM) <= xp.max + 0.001; k++) _addTick(gx(k * 12 - oM)); } else { const r = xp.max - xp.min; for (let i = 0; i <= r; i++) _addTick(gx(xp.min + i)); } } else { const r = xp.max - xp.min; for (let i = 0; i <= r; i++) _addTick(gx(xp.min + i)); } })(); const shouldSkipLbls = cmp && lbls.length >= 6; lbls.forEach((l, i) => { let v = 0; let txtOverride = null; if (vt === 'DAY') v = xp.min + (i * 7200000) + 3600000; else if (vt === 'YEAR') v = i + 0.5; else if (vt === 'MONTH') v = i + 1.5; else if (vt === 'WEEK') v = i + 0.5; else if (vt === 'ALL_TIME') v = i; if (v > xp.max) return; const x = gx(v); if ((vt === 'MONTH' || vt === 'ALL_TIME') && shouldSkipLbls && i % 2 !== 0) return; if (vt === 'YEAR' && shouldSkipLbls && i % 2 === 0) return; const t = document.createElementNS("http://www.w3.org/2000/svg", "text"); const yp = cmp ? ch + 13 : (expandedPanel ? ch + 14 : ch + 20); t.setAttribute("x", x); t.setAttribute("y", yp); t.setAttribute("class", "g-text x-label"); let txt = l; if (vt === 'DAY' && cmp) txt = l.replace(':00', ''); if (vt === 'WEEK') { const d = Formatter.parse(l); const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; const fullDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']; txt = cmp ? shortDays[d.getUTCDay()] : fullDays[d.getUTCDay()]; } if (vt === 'ALL_TIME' && cmp && typeof l === 'string' && l.indexOf(' ') !== -1) { txt = l.split(' ')[1]; } if (txtOverride !== null) txt = txtOverride; t.textContent = txt; t.setAttribute("text-anchor", "middle"); g.appendChild(t); }); if (vt === 'ALL_TIME' && dat.labelMeta) { const shouldSkipMeta = cmp && dat.labelMeta.length >= 6; dat.labelMeta.forEach((meta, i) => { if (shouldSkipMeta && i % 2 !== 0) return; if (meta.x < xp.min || meta.x > xp.max) return; const lx = gx(meta.x); const lyp = cmp ? ch + 13 : (expandedPanel ? ch + 14 : ch + 20); const lt = document.createElementNS("http://www.w3.org/2000/svg", "text"); lt.setAttribute("x", lx); lt.setAttribute("y", lyp); lt.setAttribute("class", "g-text x-label"); lt.setAttribute("text-anchor", "middle"); let txt = meta.text; if (cmp && typeof txt === 'string' && txt.indexOf(' ') !== -1) { txt = txt.split(' ')[0]; } lt.textContent = txt; g.appendChild(lt); }); } graphState.activeStats.forEach(s => {
+            Perf.start('graphDraw'); if (document.hidden) { runtime.graphDirty = true; Perf.end('graphDraw'); return; } const svg = dom.graphSvg, cont = dom.graphContainer; if (!svg || !cont) { Perf.end('graphDraw'); return; } const dat = GraphController._transformData({ selectedData: calendarState.selectedData, selectedLabel: calendarState.selectedLabel, year: calendarState.year, graphMode: graphState.mode }), tr = dat.trends, lbls = dat.labels, vt = dat.viewType, xp = dat.xParams; svg.textContent = ''; svg.setAttribute('preserveAspectRatio', 'none'); void cont.offsetHeight; let w = svg.clientWidth || cont.clientWidth; const _hudEl = cont.querySelector('.g-hud'); const _hudH = _hudEl ? Math.ceil(_hudEl.getBoundingClientRect().height) : 28; const _cStyle = window.getComputedStyle(cont); const _padV = parseFloat(_cStyle.paddingTop) + parseFloat(_cStyle.paddingBottom); let h = svg.clientHeight || (cont.clientHeight > _hudH + _padV ? cont.clientHeight - _hudH - _padV : 0); if (w <= 0 || h <= 0) { Perf.end('graphDraw'); requestAnimationFrame(() => GraphController.draw()); return; } const cmp = w < 300; const expandedPanel = !!cont.closest('#bbgl-panel.bbgl-expanded:not(.bbgl-mode-page)'); const isPageMode = !!cont.closest('#bbgl-panel.bbgl-mode-page'); svg.setAttribute('viewBox', `0 0 ${w} ${h}`); let _yPeak = 0; graphState.activeStats.forEach(s => { if (tr[s]) tr[s].forEach(p => { if (isFinite(p.y) && p.y > _yPeak) _yPeak = p.y; }); }); const _yMT = document.createElementNS('http://www.w3.org/2000/svg', 'text'); _yMT.setAttribute('class', 'g-text y-label'); _yMT.style.cssText = 'visibility:hidden;pointer-events:none;'; svg.appendChild(_yMT); _yMT.textContent = Formatter.axis(_yPeak || 10); const _yMaxStr = _yMT.textContent || '10'; const _yFontPx = (expandedPanel || cont.closest('.bbgl-mode-page')) ? 11 : (cmp ? 9 : 11); const _yLWEst = Math.ceil(_yMaxStr.length * _yFontPx * 0.72) + 4; let _yLW = Math.ceil(_yMT.getBBox().width); if (!isFinite(_yLW) || _yLW < 1) _yLW = _yLWEst; if (_yLW > _yLWEst) _yLW = _yLWEst; const _yCap = Math.max(20, Math.floor(w * 0.28) - 5); if (_yLW > _yCap) _yLW = _yCap; svg.removeChild(_yMT); const xLabDrop = (cmp ? 10 : (expandedPanel ? 11 : 14)) + (cont.closest('.bbgl-mode-page') ? 0 : 1); const _topMar = isPageMode ? 6 : 6; let mar = { top: _topMar, bottom: Math.max(2, xLabDrop - 6), left: _yLW + 5, right: 0 };
+            const cw = w - mar.left - mar.right, ch = h - mar.top - mar.bottom; if (cw <= 0 || ch <= 0) { Perf.end('graphDraw'); return; } const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); g.setAttribute("transform", `translate(${mar.left}, ${mar.top})`); let min = Infinity, max = -Infinity, hd = false; graphState.activeStats.forEach(s => { if (tr[s] && tr[s].length > 0) { hd = true; tr[s].forEach(p => { if (!isFinite(p.y)) return; if (p.y < min) min = p.y; if (p.y > max) max = p.y; }); } }); if (!hd || min === Infinity) { min = 0; STAT_KEYS.forEach(s => { if (tr[s] && tr[s].length > 0) tr[s].forEach(p => { if (isFinite(p.y) && p.y > max) max = p.y; }); }); } if (max === -Infinity) { min = 0; max = 10; } let sc = GraphController._calculateNiceScale(min, max), fMin = sc.min, fMax = sc.max, step = sc.step, steps = Math.round((fMax - fMin) / step), pL = [], rng = fMax - fMin; for (let i = 0; i <= steps; i++) pL.push(Formatter.axis(fMin + (i * step))); if (new Set(pL).size < (steps + 1)) { const div = ((n) => { const a = Math.abs(n); if (a >= 1e12) return 1e12; if (a >= 1e9) return 1e9; if (a >= 1e6) return 1e6; if (a >= 1e3) return 1e3; return 1; })(max); fMin = Math.floor(min / div) * div; fMax = Math.ceil(max / div) * div; if (fMax <= fMin) fMax = fMin + div; step = div; if ((fMax - fMin) / step < 2) fMax = fMin + (step * 2); steps = Math.round((fMax - fMin) / step); } let fr = fMax - fMin; if (fr <= 0) { fMax = fMin + 10; fr = 10; } for (let i = 0; i <= steps; i++) { const v = fMin + (i * step), y = ch - ((v - fMin) / fr) * ch; if (isNaN(y)) continue; const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); l.setAttribute("x1", 0); l.setAttribute("x2", cw); l.setAttribute("y1", y); l.setAttribute("y2", y); l.setAttribute("class", "g-axis"); g.appendChild(l); const t = document.createElementNS("http://www.w3.org/2000/svg", "text"); t.setAttribute("x", -6); t.setAttribute("y", expandedPanel ? y - 1 : y + 3); t.setAttribute("class", "g-text y-label"); t.textContent = Formatter.axis(v); g.appendChild(t); } const gx = (v) => { const r = xp.max - xp.min; return r === 0 ? 0 : ((v - xp.min) / r) * cw; }, gy = (v) => ch - ((v - fMin) / fr) * ch; (function _drawTicks() { const _addTick = (tx) => { const tk = document.createElementNS("http://www.w3.org/2000/svg", "line"); tk.setAttribute("x1", tx); tk.setAttribute("x2", tx); tk.setAttribute("y1", ch); tk.setAttribute("y2", ch - 5); tk.setAttribute("class", "g-axis"); g.appendChild(tk); }; if (vt === 'DAY') { for (let i = 0; i <= 12; i++) _addTick(gx(xp.min + (i * 7200000))); } else if (vt === 'ALL_TIME') { if (dat.tier && dat.tier.startsWith('Mo')) { const sw = 1; for (let n = Math.ceil(xp.min / sw); n * sw <= xp.max + 0.001; n++) _addTick(gx(n * sw)); } else if (dat.tier && dat.tier.startsWith('Yr')) { const oM = dat.anchorDate ? dat.anchorDate.getUTCMonth() : 0; for (let k = 1; (k * 12 - oM) <= xp.max + 0.001; k++) _addTick(gx(k * 12 - oM)); } else { const r = xp.max - xp.min; for (let i = 0; i <= r; i++) _addTick(gx(xp.min + i)); } } else { const r = xp.max - xp.min; for (let i = 0; i <= r; i++) _addTick(gx(xp.min + i)); } })(); const shouldSkipLbls = cmp && lbls.length >= 6 && !isPageMode; const _xr = xp.max - xp.min; let _monthPageXFs = null; if (vt === 'MONTH' && isPageMode && _xr > 0) { const _slotPx = cw / _xr; _monthPageXFs = Math.round(Math.max(7.25, Math.min(11, _slotPx / 1.35)) * 10) / 10; } lbls.forEach((l, i) => { let v = 0; let txtOverride = null; if (vt === 'DAY') v = xp.min + (i * 7200000) + 3600000; else if (vt === 'YEAR') v = i + 0.5; else if (vt === 'MONTH') v = i + 1.5; else if (vt === 'WEEK') v = i + 0.5; else if (vt === 'ALL_TIME') v = i; if (v > xp.max) return; const x = gx(v); if ((vt === 'MONTH' || vt === 'ALL_TIME') && shouldSkipLbls && i % 2 !== 0) return; if (vt === 'YEAR' && shouldSkipLbls && i % 2 === 0) return; const t = document.createElementNS("http://www.w3.org/2000/svg", "text"); const yp = ch + xLabDrop; t.setAttribute("x", x); t.setAttribute("y", yp); t.setAttribute("class", "g-text x-label"); let txt = l; if (vt === 'DAY' && cmp) txt = l.replace(':00', ''); if (vt === 'WEEK') { const d = Formatter.parse(l); const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; const fullDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']; txt = cmp ? shortDays[d.getUTCDay()] : fullDays[d.getUTCDay()]; } if (vt === 'ALL_TIME' && cmp && typeof l === 'string' && l.indexOf(' ') !== -1) { txt = l.split(' ')[1]; } if (txtOverride !== null) txt = txtOverride; t.textContent = txt; t.setAttribute("text-anchor", "middle"); if (_monthPageXFs != null && vt === 'MONTH') { t.style.fontSize = _monthPageXFs + 'px'; if (_monthPageXFs < 9.5) t.style.letterSpacing = '0px'; } g.appendChild(t); }); if (vt === 'ALL_TIME' && dat.labelMeta) { const shouldSkipMeta = cmp && dat.labelMeta.length >= 6 && !isPageMode; dat.labelMeta.forEach((meta, i) => { if (shouldSkipMeta && i % 2 !== 0) return; if (meta.x < xp.min || meta.x > xp.max) return; const lx = gx(meta.x); const lyp = ch + xLabDrop; const lt = document.createElementNS("http://www.w3.org/2000/svg", "text"); lt.setAttribute("x", lx); lt.setAttribute("y", lyp); lt.setAttribute("class", "g-text x-label"); lt.setAttribute("text-anchor", "middle"); let txt = meta.text; if (cmp && typeof txt === 'string' && txt.indexOf(' ') !== -1) { txt = txt.split(' ')[0]; } lt.textContent = txt; g.appendChild(lt); }); } graphState.activeStats.forEach(s => {
                 if (!tr[s] || tr[s].length === 0) return; const arr = tr[s], sty = arr[0].y, col = (s === 'total' ? CONSTANTS.COLORS.TOT : (CONSTANTS.COLORS[s.toUpperCase()] || '#ffffff')); let str = sty; const vs = arr.find(p => p.y > 0); if (vs) str = vs.y; let d = "", _ps = false; arr.forEach((p) => { const x = gx(p.x), y = gy(p.y); if (!isFinite(x) || !isFinite(y)) { _ps = false; return; } if (!_ps) { d += `M ${x} ${y}`; _ps = true; } else d += ` L ${x} ${y}`; }); const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); p.setAttribute("d", d); p.setAttribute("stroke", col); p.setAttribute("class", "g-path"); p.setAttribute("vector-effect", "non-scaling-stroke"); g.appendChild(p); const dns = (vt !== 'YEAR' && arr.length > 50); arr.forEach((p, i) => {
                     const x = gx(p.x), y = gy(p.y), grp = document.createElementNS("http://www.w3.org/2000/svg", "g"); grp.setAttribute("class", "g-point-group"); grp.setAttribute("data-stat", s); grp.setAttribute("data-cx", x); grp.setAttribute("data-cy", y);
                     const hit = document.createElementNS("http://www.w3.org/2000/svg", "circle"); hit.setAttribute("cx", x); hit.setAttribute("cy", y); hit.setAttribute("r", 8); hit.setAttribute("fill", "transparent"); grp.appendChild(hit); if (!dns || i === arr.length - 1) { const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle"); dot.setAttribute("cx", x); dot.setAttribute("cy", y); dot.setAttribute("r", 4); dot.setAttribute("fill", col); dot.setAttribute("class", "g-point-visual"); grp.appendChild(dot); } let stt = s === 'str' ? "STRENGTH" : s === 'def' ? "DEFENSE" : s === 'spd' ? "SPEED" : s === 'dex' ? "DEXTERITY" : "TOTAL STATS", body = ""; const tl = GraphController._graphTooltipHeader(vt, p, i, arr, dat); let prevVal = sty; if (vt === 'YEAR') { if (i === 0) prevVal = p.y; else prevVal = arr[i - 1].y; } else prevVal = sty; if (graphState.mode === 'rates') { const cr = p.y, dl = cr - str, sg = dl >= 0 ? '+' : '', pc = str > 0 ? (dl / str) * 100 : 0; body = `<div class="tt-row"><span class="tt-label">Rate</span> <span class="tt-total">${cr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div><div class="tt-row"><span class="tt-label">Growth</span> <span style="color:${dl >= 0 ? CONSTANTS.COLORS.GAINS : '#ff5252'}; font-weight:bold;">${sg}${dl.toFixed(2)} <span style="font-size:10px; opacity:0.8;">(${sg}${pc.toFixed(1)}%)</span></span></div>`; } else if (graphState.mode === 'gains') body = `<div class="tt-row"><span class="tt-label">Gained</span> <span class="tt-val">+${Formatter.dual(p.y)}</span></div>`; else { const cv = p.y, gv = (vt === 'YEAR' && i === 0) ? 0 : cv - prevVal, gs = gv >= 0 ? '+' : ''; body = `<div class="tt-row"><span class="tt-label">Total</span> <span class="tt-total">${Formatter.number(cv)}</span></div><div class="tt-row"><span class="tt-label">Gains</span> <span class="tt-val">${gs}${Formatter.number(gv)}</span></div>`; } grp.setAttribute("data-tooltip-html", `<div class="tt-header" style="border:none; margin-bottom:0; padding-bottom:0;">${tl}</div><div style="text-align:center; font-weight:bold; font-size:10px; color:${col}; margin-bottom:4px; letter-spacing:1px;">${stt}</div><div style="border-bottom:1px solid rgba(255,255,240,0.15); margin-bottom:5px;"></div>${body}`); g.appendChild(grp);
