@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Big Black Gym Log Teste
 // @namespace    http://tampermonkey.net/
-// @version      0.9.46
+// @version      0.9.48
 // @description  A high-fidelity, gamified stat tracker built to integrate seamlessly with Torn's native UI.
 // @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
@@ -106,13 +106,13 @@
             /*================================================================================================================*/
                     .bbgl-prefs-tab-title { background-image:linear-gradient(rgb(85,85,85) 0%,rgb(51,51,51) 100%);
                     color:#fff; font-family:Arial,sans-serif; font-size:12px; font-weight:700; /*---------------------*/
-                    line-height:30px; padding-left:10px; border:1px solid #111; border-bottom:1px solid #000; /*------*/
-                    box-shadow:inset 0 1px 0 rgba(255,255,255,0.1),0 1px 0 #444; border-radius:5px 5px 0 0; /*------*/
+                    line-height:30px; padding-left:10px; border:1px solid #111; border-bottom:1px solid #000; /*--*/
+                    box-shadow:inset 0 1px 0 rgba(255,255,255,0.1),0 1px 0 #444; border-radius:5px 5px 0 0; /*----*/
                     width:100%; box-sizing:border-box; margin:0; z-index:2; position:relative; } /*-------------------*/
                     .bbgl-prefs-tab-title:first-child { margin-top:0; } /*--------------------------------------------*/
                     .torn-btn { background-image:linear-gradient(rgb(17,17,17) 0%,rgb(85,85,85) 25%,rgb(51,51,51) 60%,rgb(51,51,51) 78%,rgb(17,17,17) 100%);
                     color:#eee; font-family:"Fjalla One",Arial,serif; font-size:14px; font-weight:400; /*-------------*/
-                    line-height:34px; padding:0; border:1px solid #111; border-radius:5px; /*-------------------------*/
+                    line-height:34px; padding:0; border:1px solid #111; border-radius:5px; /*-----------------------*/
                     width:100%; height:34px; cursor:pointer; text-align:center; text-transform:uppercase; /*----------*/
                     box-sizing:border-box; display:block; transition:none; } /*---------------------------------------*/
                     .torn-btn:hover { background-image:linear-gradient(rgb(51,51,51) 0%,rgb(119,119,119) 25%,rgb(51,51,51) 59%,rgb(102,102,102) 78%,rgb(51,51,51) 100%);
@@ -140,7 +140,7 @@
                     font-family:Arial,sans-serif; font-size:13px; color:#ddd; } /*------------------------------------*/
                     .bbgl-setting-row:last-child { border-bottom:none; box-shadow:none; } /*--------------------------*/
                     .bbgl-api-container { position:relative; width:100%; margin-bottom:8px; } /*----------------------*/
-                    .bbgl-native-input { width:100%; background:#333; border:1px solid #555; /*-----------------------*/
+                    .bbgl-native-input { width:100%; background:#333; border:1px solid #555; /*---------------------*/
                     color:#fff; padding:8px 30px; font-family:'Roboto Mono',monospace; font-size:12px; /*-------------*/
                     border-radius:4px; box-sizing:border-box; } .bbgl-paste-icon { position:absolute; left:4px; /*----*/
                     top:50%; transform:translateY(-50%); cursor:pointer; width:22px; height:22px; display:flex; /*----*/
@@ -149,7 +149,7 @@
                     .bbgl-paste-icon:hover svg { fill:#fff; } /*------------------------------------------------------*/
                     .bbgl-expanded .bbgl-paste-icon { width:26px; height:26px; } /*-----------------------------------*/
                     .bbgl-expanded .bbgl-paste-icon svg { width:17px; height:17px; } /*-------------------------------*/
-                    .bbgl-native-select { background:#333; color:#fff; border:1px solid #555; /*----------------------*/
+                    .bbgl-native-select { background:#333; color:#fff; border:1px solid #555; /*--------------------*/
                     padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer; } /*--------------------------*/
                     .bbgl-switch { position:relative; display:inline-block; width:34px; height:18px; } /*-------------*/
                     .bbgl-switch input { opacity:0; width:0; height:0; } .slider { position:absolute; cursor:pointer;
@@ -201,7 +201,7 @@
                     min-height:calc(100vh - 60px); height:auto; padding:8px 0; box-sizing:border-box; /*--------------*/
                     container-type:inline-size; container-name:bbgl-page; } /*----------------------------------------*/
                     .bbgl-native-header { display:flex; align-items:center; justify-content:space-between; /*---------*/
-                    padding:0 0 8px; margin-bottom:15px; border-bottom:1px solid #444; flex:0 0 auto; /*--------------*/
+                    padding:0 0 8px; margin-bottom:15px; border-bottom:1px solid #444; flex:0 0 auto; /*------------*/
                     position:relative; } .bbgl-native-header::after { content:""; position:absolute; bottom:-1px; /*--*/
                     left:0; width:100%; height:1px; background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.3) 50%,transparent 100%);
                     } .bbgl-native-title { font-family:Arial; font-weight:700; font-size:22px; /*---------------------*/
@@ -216,12 +216,12 @@
                     body.bbgl-page-mode-active #bbgl-page-container #bbgl-page-demo-exit svg { width:clamp(20px,calc(24px - 4px * (100cqw - 280px) / 440px),24px)!important;
                     height:clamp(20px,calc(24px - 4px * (100cqw - 280px) / 440px),24px)!important; } /*---------------*/
                     #bbgl-panel { --bbgl-f-label:10px; --bbgl-f-top:10px; --bbgl-f-bot:9px; /*------------------------*/
-                    --bbgl-f-top-mb:1px; --bbgl-bot-minh:12px; --bbgl-col-gap:8px; --bbgl-gx:clamp(7px,1.78cqi,12px); /*-*/
-                    --bbgl-label-case:uppercase; --bbgl-viewer-title-top-shift:3px; /*----*/
+                    --bbgl-f-top-mb:1px; --bbgl-bot-minh:12px; --bbgl-col-gap:8px; --bbgl-gx:clamp(7px,1.78cqi,12px); 
+                    --bbgl-label-case:uppercase; --bbgl-viewer-title-top-shift:3px; /*--------------------------------*/
                     container-type:inline-size; container-name:bbgl-panel; /*-----------------------------------------*/
                     position:fixed; bottom:${LAYOUT.LIFT_HEIGHT}px; right:10px; z-index:999989; /*--------------------*/
                     font-family:Arial,sans-serif; display:none; flex-direction:column; background:#2a2a2a; /*---------*/
-                    border:1px solid #444; border-radius:5px; box-shadow:0 -2px 4px rgba(0,0,0,0.35); /*------------*/
+                    border:1px solid #444; border-radius:5px; box-shadow:0 -2px 4px rgba(0,0,0,0.35); /*----------*/
                     width:300px; height:438.5px; max-height:calc(100vh - 50px)!important; overflow-y:auto; /*---------*/
                     overflow-x:hidden; transition:width .3s cubic-bezier(0.25,1,0.5,1),height .3s cubic-bezier(0.25,1,0.5,1);
                     } #bbgl-panel.bbgl-expanded { --bbgl-f-label:clamp(12.5px,2.34cqi,13.5px); /*---------------------*/
@@ -237,7 +237,7 @@
                     --bbgl-col-gap:clamp(22px,calc(35.5px - 2.34cqi),24.5px); } #bbgl-panel.bbgl-mode-page { position:relative!important;
                     top:0!important; left:0!important; right:auto!important; bottom:auto!important; /*----------------*/
                     width:100%!important; flex:none!important; max-width:none!important; height:auto!important; /*----*/
-                    max-height:none!important; border:1px solid #444!important; border-radius:5px!important; /*-------*/
+                    max-height:none!important; border:1px solid #444!important; border-radius:5px!important; /*-----*/
                     box-shadow:0 10px 30px rgba(0,0,0,0.5)!important; box-sizing:border-box!important; /*-----------*/
                     background:#2a2a2a!important; display:flex!important; flex-direction:column!important; /*---------*/
                     gap:0!important; z-index:1!important; overflow-x:hidden!important; overflow-y:visible!important; }
@@ -278,12 +278,12 @@
                     .bbgl-mode-page:has(#bbgl-settings-view.active-view) #bbgl-bottom-panel { flex:none!important; }
                     #bbgl-panel.bbgl-expanded.bbgl-mode-page .bbgl-grid-container { height:auto!important; /*---------*/
                     flex:none!important; padding:0 clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px) clamp(1px,calc(1px + 3px * var(--bbgl-page-t)),4px) clamp(2px,calc(2px + 2px * var(--bbgl-page-t)),4px)!important; overflow:visible!important; } /*--*/
-                    .bbgl-mode-page .calendar-wrapper { height:auto!important; flex:none!important; overflow:hidden!important; } /*--------*/
+                    .bbgl-mode-page .calendar-wrapper { height:auto!important; flex:none!important; overflow:hidden!important; }
                     .bbgl-mode-page .bbgl-cal-container { height:auto!important; display:flex; flex-direction:column; }
                     .bbgl-mode-page .bbgl-row-slice { flex:none!important; width:100%; } /*---------------------------*/
                     .bbgl-mode-page .bbgl-day-cell { aspect-ratio:1/1!important; height:auto!important; /*------------*/
                     width:100%!important; } /*------------------------------------------------------------------------*/
-                    #bbgl-panel.bbgl-expanded.bbgl-mode-page .ledger-content:not(#bbgl-achievements-container) { height:auto!important; /*--------------*/
+                    #bbgl-panel.bbgl-expanded.bbgl-mode-page .ledger-content:not(#bbgl-achievements-container) { height:auto!important;
                     overflow:visible!important; align-content:flex-start!important; grid-template-rows:1fr!important;
                     padding-top:clamp(25px,calc(25px + 1px * var(--bbgl-page-t)),26px)!important; /*------------------*/
                     padding-bottom:clamp(8px,calc(8px + 7px * var(--bbgl-page-t)),15px)!important; /*-----------------*/
@@ -763,8 +763,8 @@
                     width:clamp(28px,calc(28px + 12px * var(--bbgl-page-t)),40px)!important; /*-----------------------*/
                     height:clamp(28px,calc(28px + 12px * var(--bbgl-page-t)),40px)!important; } /*--------------------*/
                     .header-row { display:flex; align-items:center; gap:6px; position:relative; } /*------------------*/
-                    #bbgl-panel:not(.bbgl-mode-page) .title-stack > .header-row:first-child { margin-bottom: -2px; }
-                    #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .title-stack > .header-row:first-child { margin-bottom: -4px;
+                    #bbgl-panel:not(.bbgl-mode-page) .title-stack > .header-row:nth-child(2) { margin-bottom: -2px; }
+                    #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .title-stack > .header-row:nth-child(2) { margin-bottom: -4px;
                     } .stats-btn { width:18px; height:18px; display:flex; align-items:center; /*----------------------*/
                     justify-content:center; cursor:pointer; opacity:.9; transition:all .2s; /*------------------------*/
                     filter:drop-shadow(0 1px 2px rgba(0,0,0,0.8)); } /*---------------------------------------------*/
@@ -1054,7 +1054,7 @@
                     #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .arrow-btn { /*------------------------------------*/
                     font-size:clamp(18px,3.65cqi,21px)!important; } /*------------------------------------------------*/
                     #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) .all-time-btn { /*---------------------------------*/
-                    width:33px!important; height:33px!important; } /*-------------------------------------------------*/
+                    width:33px!important; height:33px!important; margin-top: 8px!important; margin-bottom: -8px!important; } /*-------------------------------------------------*/
                     #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #year-trigger { /*---------------------------------*/
                     font-size:clamp(14px,2.78cqi,16px)!important; } /*------------------------------------------------*/
                     #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #month-trigger { /*--------------------------------*/
