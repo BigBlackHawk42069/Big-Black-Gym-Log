@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Big Black Gym Log Teste
 // @namespace    http://tampermonkey.net/
-// @version      0.9.45
+// @version      0.9.46
 // @description  A high-fidelity, gamified stat tracker built to integrate seamlessly with Torn's native UI.
 // @author       BigBlackHawk [3550896]
 // @match        https://www.torn.com/*
@@ -1106,15 +1106,12 @@
                     font-weight:bold; letter-spacing:2px; /*----------------------------------------------------------*/
                     z-index:10; pointer-events:none; text-shadow:0 0 10px rgba(255,255,255,0.2); /*-----------------*/
                     text-align:center; line-height:1.2; } @keyframes bbgl-gold-glow-once { /*-------------------------*/
-                    0% { text-shadow:0 0 0px rgba(255,235,120,0), 0 0 0px rgba(255,215,0,0), 0 0 0px rgba(255,200,0,0), 0 1px 3px rgba(0,0,0,0.85); } 100% { /*-------------*/
+                    0% { text-shadow:0 0 0 rgba(255,215,0,0), 0 1px 3px rgba(0,0,0,0.85); } 100% { /*-------------*/
                     text-shadow:0 0 18px rgba(255,235,120,1), 0 0 32px rgba(255,215,0,0.9), 0 0 50px rgba(255,200,0,0.55), 0 1px 3px rgba(0,0,0,0.85); }
                     } #sticker-sponsor-btn { left:0; border-radius:0 5px 5px 0; /*------------------------------------*/
-                    background:linear-gradient(135deg,#ffd700 0%,#ffea70 40%,#ffffff 50%,#ffea70 60%,#ffd700 100%);/*-*/
+                    background:linear-gradient(135deg,#b8860b 0%,#ffd700 40%,#fffacd 50%,#ffd700 60%,#b8860b 100%);/*-*/
                     -webkit-background-clip:text; background-clip:text; /*--------------------------------------------*/
-                    -webkit-text-fill-color:transparent; color:transparent; text-shadow:0 0 12px rgba(255,215,0,0.6), 0 1px 3px rgba(0,0,0,0.85); } 
-                    #sticker-sponsor-btn:hover { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 32px rgba(255,215,0,0.9), 0 0 50px rgba(255,200,0,0.55), 0 1px 3px rgba(0,0,0,0.85)!important; }
-                    #sticker-sponsor-btn:active { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 32px rgba(255,215,0,0.9), 0 0 50px rgba(255,200,0,0.55), 0 1px 3px rgba(0,0,0,0.85)!important; }
-                    #sticker-sponsor-btn.shimmer-once { /*--*/
+                    -webkit-text-fill-color:transparent; color:transparent; } #sticker-sponsor-btn.shimmer-once { /*--*/
                     animation:bbgl-gold-glow-once 2s ease-in-out forwards; } /*---------------------------------------*/
                     .bbgl-expanded #sticker-sponsor-btn { left:-4px; } /*---------------------------------------------*/
                     #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #sticker-sponsor-btn { left:0!important; } /*------*/
@@ -1141,7 +1138,7 @@
                     .bbgl-expanded .sponsor-sticker-label { font-size:11px; } /*--------------------------------------*/
                     #bbgl-panel.bbgl-expanded.bbgl-mode-page .sponsor-sticker-label { font-size:clamp(8px,calc(8px + 5px * var(--bbgl-page-t)),13px)!important; }
                     .pg-dot.pg-dot-sponsor.active { /*----------------------------------------------------------------*/
-                    background:linear-gradient(135deg,#ffd700,#ffea70,#ffffff,#ffea70,#ffd700)!important; /*----------*/
+                    background:linear-gradient(135deg,#b8860b,#ffd700,#fffacd,#ffd700,#b8860b)!important; /*----------*/
                     box-shadow:0 0 6px rgba(255,215,0,0.85)!important; transform:scale(1.3); } /*-------------------*/
                     .bbgl-ach-scroll { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; /*-------------*/
                     overflow:hidden; overflow-x:hidden; padding:var(--bbgl-ach-scroll-pt) var(--bbgl-ach-inset-x) var(--bbgl-ach-scroll-pb); /*-*/
@@ -1221,9 +1218,9 @@
                     .ach-fx-green { background:linear-gradient(135deg,#2e7d32,#66bb6a,#81c784,#66bb6a,#2e7d32); /*--*/
                     background-size:200% 100%; -webkit-background-clip:text; background-clip:text; /*---------------*/
                     -webkit-text-fill-color:transparent; animation:bbgl-ach-shimmer 4s linear 1, bbgl-ach-glow-green 4s ease-out 1 forwards; }
-                    .ach-fx-gold { background:linear-gradient(135deg,#ffd700,#ffea70,#ffffff,#ffea70,#ffd700); /*--*/
+                    .ach-fx-gold { background:linear-gradient(135deg,#b8860b,#ffd700,#fffacd,#ffd700,#b8860b); /*--*/
                     background-size:200% 100%; -webkit-background-clip:text; background-clip:text; /*---------------*/
-                    -webkit-text-fill-color:transparent; text-shadow:0 0 12px rgba(255,215,0,0.6), 0 1px 2px rgba(0,0,0,0.8); animation:bbgl-ach-shimmer 4s linear 1, bbgl-ach-glow-gold 4s ease-out 1 forwards; }
+                    -webkit-text-fill-color:transparent; animation:bbgl-ach-shimmer 4s linear 1, bbgl-ach-glow-gold 4s ease-out 1 forwards; }
                     .ach-fx-holo { background:linear-gradient(90deg,#00e5ff,#d500f9,#2979ff,#00e5ff); /*------------*/
                     background-size:200% 100%; -webkit-background-clip:text; background-clip:text; /*---------------*/
                     -webkit-text-fill-color:transparent; animation:bbgl-ach-shimmer 4s linear 1; } /*----------------*/
