@@ -1111,9 +1111,9 @@
                     } #sticker-sponsor-btn { left:0; border-radius:0 5px 5px 0; /*------------------------------------*/
                     background:linear-gradient(135deg,#ffd700 0%,#ffea70 40%,#ffffff 50%,#ffea70 60%,#ffd700 100%);/*-*/
                     -webkit-background-clip:text; background-clip:text; /*--------------------------------------------*/
-                    -webkit-text-fill-color:transparent; color:transparent; text-shadow:0 0 12px rgba(255,215,0,0.6), 0 0 0px rgba(255,255,255,0), 0 1px 3px rgba(0,0,0,0.85); } 
-                    @media (hover: hover) { #sticker-sponsor-btn:hover { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 24px rgba(255,255,255,0.8), 0 1px 3px rgba(0,0,0,0.85); } }
-                    #sticker-sponsor-btn:active { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 24px rgba(255,255,255,0.8), 0 1px 3px rgba(0,0,0,0.85); }
+                    -webkit-text-fill-color:transparent; color:transparent; text-shadow:0 0 12px rgba(255,215,0,0.6), 0 1px 3px rgba(0,0,0,0.85); } 
+                    #sticker-sponsor-btn:hover { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 32px rgba(255,215,0,0.9), 0 0 50px rgba(255,200,0,0.55), 0 1px 3px rgba(0,0,0,0.85)!important; }
+                    #sticker-sponsor-btn:active { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 32px rgba(255,215,0,0.9), 0 0 50px rgba(255,200,0,0.55), 0 1px 3px rgba(0,0,0,0.85)!important; }
                     #sticker-sponsor-btn.shimmer-once { /*--*/
                     animation:bbgl-gold-glow-once 2s ease-in-out forwards; } /*---------------------------------------*/
                     .bbgl-expanded #sticker-sponsor-btn { left:-4px; } /*---------------------------------------------*/
