@@ -1111,7 +1111,10 @@
                     } #sticker-sponsor-btn { left:0; border-radius:0 5px 5px 0; /*------------------------------------*/
                     background:linear-gradient(135deg,#b8860b 0%,#ffd700 40%,#fffacd 50%,#ffd700 60%,#b8860b 100%);/*-*/
                     -webkit-background-clip:text; background-clip:text; /*--------------------------------------------*/
-                    -webkit-text-fill-color:transparent; color:transparent; } #sticker-sponsor-btn.shimmer-once { /*--*/
+                    -webkit-text-fill-color:transparent; color:transparent; text-shadow:0 0 12px rgba(255,215,0,0.6), 0 0 0px rgba(255,255,255,0), 0 1px 3px rgba(0,0,0,0.85); } 
+                    @media (hover: hover) { #sticker-sponsor-btn:hover { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 24px rgba(255,255,255,0.8), 0 1px 3px rgba(0,0,0,0.85); } }
+                    #sticker-sponsor-btn:active { text-shadow:0 0 18px rgba(255,235,120,1), 0 0 24px rgba(255,255,255,0.8), 0 1px 3px rgba(0,0,0,0.85); }
+                    #sticker-sponsor-btn.shimmer-once { /*--*/
                     animation:bbgl-gold-glow-once 2s ease-in-out forwards; } /*---------------------------------------*/
                     .bbgl-expanded #sticker-sponsor-btn { left:-4px; } /*---------------------------------------------*/
                     #bbgl-panel.bbgl-expanded:not(.bbgl-mode-page) #sticker-sponsor-btn { left:0!important; } /*------*/
