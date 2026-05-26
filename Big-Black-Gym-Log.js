@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         Big Black Gym Log
 // @namespace    http://tampermonkey.net/
 // @version      0.9.51
@@ -289,7 +289,7 @@
                     padding-bottom:clamp(0px,calc(0px + 15px * var(--bbgl-page-t)),15px)!important; /*-----------------*/
                     padding-left:4px!important; padding-right:4px!important; } /*-------------------------------------*/
                     #bbgl-panel.bbgl-expanded.bbgl-mode-page #bbgl-achievements-container { /*------------------------*/
-                    --bbgl-ach-inset-x:clamp(2px,calc(6px - 2px * var(--bbgl-page-t)),8px); /*-------------------------*/
+                    --bbgl-ach-inset-x:clamp(6px,calc(6px + 4px * var(--bbgl-page-t)),24px); /*------------------------*/
                     --bbgl-ach-container-pt:clamp(10px,calc(21px - 10.5px * var(--bbgl-page-t)),21px); /*-------------*/
                     --bbgl-ach-scroll-pt:clamp(2px,calc(4px - 1px * var(--bbgl-page-t)),5px); /*-----------------------*/
                     --bbgl-ach-footer-pt:clamp(0px,calc(1px + 1px * var(--bbgl-page-t)),2px); /*-------------------*/
